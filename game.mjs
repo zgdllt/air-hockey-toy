@@ -24,6 +24,7 @@ let toastTimer;
 let bannerTimer;
 let screenShake = 0;
 let visualTime = 0;
+let portraitView = false;
 
 function readRecord() {
   try {
@@ -167,7 +168,7 @@ function updateScoreboard() {
   $('#player-score').textContent = game.score.player;
   $('#computer-score').textContent = game.score.computer;
   const active = game.phase === 'playing';
-  $('#pause').disabled = !['playing', 'countdown', 'goal'].includes(game.phase);
+  $('#pause').disabled = ['ready', 'finished'].includes(game.phase);
   $('#pause').textContent = game.phase === 'paused' ? '▶' : 'Ⅱ';
   $('#status-dot').classList.toggle('live', active);
   const status = {
@@ -284,7 +285,9 @@ function playFinishSound(playerWon) {
 
 function canvasPoint(event) {
   const rect = canvas.getBoundingClientRect();
-  return { x: (event.clientX - rect.left) / rect.width * RINK.width, y: (event.clientY - rect.top) / rect.height * RINK.height };
+  const viewX = (event.clientX - rect.left) / rect.width * (portraitView ? RINK.height : RINK.width);
+  const viewY = (event.clientY - rect.top) / rect.height * (portraitView ? RINK.width : RINK.height);
+  return portraitView ? { x: RINK.width - viewY, y: viewX } : { x: viewX, y: viewY };
 }
 
 function setPointerTarget(event) {
@@ -303,6 +306,7 @@ function updateKeyboard(dt) {
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
   const dpr = Math.min(2, window.devicePixelRatio || 1);
+  portraitView = rect.width < 700 && rect.height > rect.width;
   canvas.width = Math.max(1, Math.round(rect.width * dpr));
   canvas.height = Math.max(1, Math.round(rect.height * dpr));
 }
@@ -316,7 +320,12 @@ function render() {
   const rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  ctx.setTransform(dpr * rect.width / RINK.width, 0, 0, dpr * rect.height / RINK.height, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const viewWidth = portraitView ? RINK.height : RINK.width;
+  const viewHeight = portraitView ? RINK.width : RINK.height;
+  ctx.setTransform(dpr * rect.width / viewWidth, 0, 0, dpr * rect.height / viewHeight, 0, 0);
+  if (portraitView) { ctx.translate(0, RINK.width); ctx.rotate(-Math.PI / 2); }
   const shake = screenShake * 7;
   ctx.translate(Math.sin(visualTime * 77) * shake, Math.cos(visualTime * 61) * shake * .7);
   ctx.clearRect(0, 0, RINK.width, RINK.height);
@@ -364,7 +373,7 @@ function drawGraffitiFeedback(feedback) {
   const wobble = Math.sin(visualTime * 12 + feedback.x) * (feedback.heavy ? 2.2 : 1.3);
   ctx.save();
   ctx.translate(feedback.x + wobble, feedback.y - lift);
-  ctx.rotate((feedback.flip ? -1 : 1) * (-.07 + Math.sin(visualTime * 7 + feedback.y) * .025));
+  ctx.rotate((portraitView ? Math.PI / 2 : 0) + (feedback.flip ? -1 : 1) * (-.07 + Math.sin(visualTime * 7 + feedback.y) * .025));
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = '#162b32'; ctx.lineWidth = feedback.heavy ? 7 : 5; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   ctx.beginPath();
@@ -396,7 +405,7 @@ function drawGoal(side, x, color) {
   ctx.globalAlpha = .72; ctx.strokeStyle = color; ctx.lineWidth = 1;
   for (let y = 190; y < 380; y += 15) { ctx.beginPath(); ctx.moveTo(left + 12, y); ctx.lineTo(left + 88, y); ctx.stroke(); }
   ctx.restore();
-  ctx.fillStyle = color; ctx.globalAlpha = .65; ctx.font = '500 11px DM Mono, monospace'; ctx.textAlign = side === 'left' ? 'left' : 'right'; ctx.fillText(side === 'left' ? 'YOU' : 'CPU', side === 'left' ? 20 : 980, 165); ctx.globalAlpha = 1;
+  if (!portraitView) { ctx.fillStyle = color; ctx.globalAlpha = .65; ctx.font = '500 11px DM Mono, monospace'; ctx.textAlign = side === 'left' ? 'left' : 'right'; ctx.fillText(side === 'left' ? 'YOU' : 'CPU', side === 'left' ? 20 : 980, 165); ctx.globalAlpha = 1; }
 }
 
 function drawMallet(mallet, outer, inner, label) {
@@ -404,7 +413,7 @@ function drawMallet(mallet, outer, inner, label) {
   ctx.beginPath(); ctx.arc(mallet.x, mallet.y, RINK.malletRadius, 0, Math.PI * 2); ctx.fillStyle = outer; ctx.fill(); ctx.shadowColor = 'transparent';
   ctx.beginPath(); ctx.arc(mallet.x, mallet.y, RINK.malletRadius * .67, 0, Math.PI * 2); ctx.fillStyle = inner; ctx.fill();
   ctx.beginPath(); ctx.arc(mallet.x - 9, mallet.y - 10, RINK.malletRadius * .19, 0, Math.PI * 2); ctx.fillStyle = 'rgba(244,243,233,.76)'; ctx.fill();
-  ctx.fillStyle = 'rgba(22,43,50,.7)'; ctx.font = '500 8px DM Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(label, mallet.x, mallet.y + 3); ctx.restore();
+  if (!portraitView) { ctx.fillStyle = 'rgba(22,43,50,.7)'; ctx.font = '500 8px DM Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(label, mallet.x, mallet.y + 3); } ctx.restore();
 }
 
 function drawPuck(puck) {

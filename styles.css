@@ -192,6 +192,16 @@ dialog h2 { margin: 10px 0 26px; font-size: 31px; letter-spacing: -.09em; }
   dialog { padding: 28px 23px 23px; }
 }
 
+@media (max-width: 660px) and (orientation: portrait) {
+  main { gap: 24px; }
+  .arena { margin-top: 2px; }
+  #rink { aspect-ratio: 560 / 1000; }
+  .stage::before { border-width: 6px; }
+  .stage-overlay { padding: 12px; }
+  .start-ticket { box-shadow: 7px 7px 0 var(--teal); }
+  .arena-footer { padding-top: 9px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
