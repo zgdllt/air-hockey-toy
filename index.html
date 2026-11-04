@@ -13,7 +13,7 @@
 <body>
   <header class="site-header">
     <a class="brand" href="#" aria-label="一拍即合首页"><span class="brand-mark" aria-hidden="true"><i></i><b></b></span><span>一拍即合<small>AIR HOCKEY CLUB</small></span></a>
-    <div class="header-right"><span class="edition">随时来一局 <span>VOL. 01</span></span><button class="icon-button" id="sound" aria-label="开启音效" aria-pressed="false" title="音效">♪<span class="sound-slash"></span></button><button class="text-button" id="rules-button">怎么玩 <span aria-hidden="true">↗</span></button></div>
+    <div class="header-right"><span class="edition">随时来一局 <span>VOL. 01</span></span><button class="icon-button" id="sound" aria-label="开启音效" aria-pressed="false" title="音效">♪<span class="sound-slash"></span></button><button class="icon-button haptics-button" id="haptics" aria-label="开启触感" aria-pressed="false" title="触感" hidden>⌁</button><a class="text-button promo-link" href="./promo/index.html">宣传片 <span aria-hidden="true">↗</span></a><button class="text-button" id="rules-button">怎么玩 <span aria-hidden="true">↗</span></button></div>
   </header>
 
   <main>
@@ -41,7 +41,7 @@
     </section>
   </main>
 
-  <footer class="site-footer"><span>MADE FOR A LITTLE GOOD TIME.</span><span>一拍即合 <b>✳</b> 空气曲棍球</span></footer>
+  <footer class="site-footer"><nav class="footer-links" aria-label="更多"><a href="./promo/index.html">宣传片</a><a class="app-download" href="https://github.com/zgdllt/air-hockey-toy/releases/latest">下载 App ↓</a></nav><span>MADE FOR A LITTLE GOOD TIME.</span><span>一拍即合 <b>✳</b> 空气曲棍球</span></footer>
   <div class="toast" id="toast" role="status"></div>
 
   <dialog id="rules-dialog"><button class="dialog-close" aria-label="关闭玩法说明">×</button><div class="eyebrow">A QUICK WARM-UP</div><h2>三句话，就会玩。</h2><ol class="rules-list"><li><b>01</b><p><strong>控制蓝色球拍</strong><span>电脑上移动鼠标，手机上按住拖动。球拍只在自己的半场移动，也支持 WASD 和方向键。</span></p></li><li><b>02</b><p><strong>把球送进对面球门</strong><span>迎上去击球，用侧壁打出角度。移动越快，击球越有力。</span></p></li><li><b>03</b><p><strong>先得 5 分，拿下这局</strong><span>失分一方接下一次发球。停球会自动重新发球；切到其他页面会暂停。空格可暂停 / 继续。</span></p></li></ol><p class="dialog-note">难度在开局前选择。本机记录保存在当前浏览器；战绩图可以保存和分享。点球桌右上角的 ⛶ 可进入全屏，按 Esc 退出。</p><button class="primary-button dialog-close-button">懂了，开拍 <span>↗</span></button></dialog>

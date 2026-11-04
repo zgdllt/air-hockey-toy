@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+const nested = new URL('../../web/air-hockey/haptics.mjs', import.meta.url);
+const { createHaptics, HAPTIC_PROFILES, browserTimings } = await import(existsSync(nested) ? nested : new URL('../../haptics.mjs', import.meta.url));
+const messages = { android: [], mac: [] };
+let now = 0;
+const base = { performance: { now: () => now }, document: { hidden: false } };
+const android = createHaptics({ ...base, AndroidHaptics: { pulse: json => messages.android.push(JSON.parse(json)), cancel() {}, setEnabled() {} } });
+const mac = createHaptics({ ...base, webkit: { messageHandlers: { macHaptics: { postMessage: value => messages.mac.push(value) } } } });
+for (const name of Object.keys(HAPTIC_PROFILES)) { now += 500; android.play(name); mac.play(name); }
+assert.deepEqual(messages.android, messages.mac);
+assert.equal(messages.android.length, Object.keys(HAPTIC_PROFILES).length);
+assert(messages.android.some(m => m.kind === 'opponent-heavy'));
+assert(messages.android.some(m => m.kind === 'opponent-hit'));
+assert(messages.android.some(m => m.kind === 'post'));
+assert.deepEqual(browserTimings(HAPTIC_PROFILES.win), [0,14,56,18,62,32]);
+const initial = messages.android.length;
+android.setEnabled(false); android.play('hit');
+assert.equal(messages.android.length, initial);
+android.setEnabled(true); base.document.hidden = true; android.play('hit');
+assert.equal(messages.android.length, initial);
+base.document.hidden = false;
+now += 1000; android.play('wall'); android.play('wall');
+assert.equal(messages.android.length, initial + 1);
+console.log(`${Object.keys(HAPTIC_PROFILES).length} haptic profiles: identical Android/Mac dispatch, disabled/background suppression and rail debounce passed`);

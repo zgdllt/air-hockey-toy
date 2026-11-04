@@ -1,0 +1,7 @@
+apps/**/build/
+apps/android-air-hockey/libs/
+apps/android-air-hockey/src/main/assets/
+*.keystore
+*.jks
+*.idsig
+.DS_Store

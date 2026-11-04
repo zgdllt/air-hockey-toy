@@ -1,4 +1,6 @@
 import { AirHockey, LEVELS, RINK } from './physics.mjs';
+import { createSfx } from './sfx.mjs';
+import { createHaptics } from './haptics.mjs';
 
 const $ = (selector) => document.querySelector(selector);
 const canvas = $('#rink');
@@ -20,11 +22,21 @@ let pointerActive = false;
 let soundOn = true;
 let audioContext;
 let noiseBuffer;
+let sfx;
+let lastWallSound = -1;
 let toastTimer;
 let bannerTimer;
 let screenShake = 0;
 let visualTime = 0;
 let portraitView = false;
+let hapticsOn = true;
+const hapticsButton = $('#haptics');
+const haptics = createHaptics();
+let nativeFullscreen = Boolean(window.AirHockeyNative?.getFullscreen?.());
+const recordAtStartup = readRecord();
+let sessionGames = 0;
+let sessionWins = 0;
+let cloudWrites = Promise.resolve();
 
 function readRecord() {
   try {
@@ -35,23 +47,27 @@ function readRecord() {
 let record = readRecord();
 
 function saveRecord(result) {
+  sessionGames += 1;
+  if (result === 'player') sessionWins += 1;
   record.games += 1;
   if (result === 'player') record.wins += 1;
   record.bestRally = Math.max(record.bestRally, game.stats.longestRally);
   record.bestSpeed = Math.max(record.bestSpeed, game.stats.fastestShot);
   try { localStorage.setItem('air-hockey-record-v1', JSON.stringify(record)); } catch { /* private browsing can reject storage */ }
   updateRecord();
-  void saveToyRecord();
+  // Wait for the initial cloud merge before writing, including a very fast match.
+  cloudWrites = cloudWrites.then(() => cloudReady).then(saveToyRecord);
 }
 
 async function loadToyRecord() {
   if (!window.toy?.getCloudStorage) return;
   try {
     const cloud = await window.toy.getCloudStorage(['air_hockey_wins', 'air_hockey_games', 'air_hockey_best_rally', 'air_hockey_best_speed']);
-    record.wins = Math.max(record.wins, Number(cloud.air_hockey_wins) || 0);
-    record.games = Math.max(record.games, Number(cloud.air_hockey_games) || 0);
+    record.wins = Math.max(recordAtStartup.wins, Number(cloud.air_hockey_wins) || 0) + sessionWins;
+    record.games = Math.max(recordAtStartup.games, Number(cloud.air_hockey_games) || 0) + sessionGames;
     record.bestRally = Math.max(record.bestRally, Number(cloud.air_hockey_best_rally) || 0);
     record.bestSpeed = Math.max(record.bestSpeed, Number(cloud.air_hockey_best_speed) || 0);
+    try { localStorage.setItem('air-hockey-record-v1', JSON.stringify(record)); } catch { /* optional storage */ }
     updateRecord();
   } catch (error) {
     if (String(error?.code) === '307044') showToast('Toy 云存储繁忙，已保留本机战绩。');
@@ -95,7 +111,7 @@ function setLevel(level) {
 
 function handleEvent(event) {
   if (event.type === 'hit') {
-    const heavy = event.side === 'player' && event.speed > 720;
+    const heavy = event.speed > 720;
     const color = event.side === 'player' ? '#9ce5d9' : '#ef765c';
     particles.push({ x: event.x, y: event.y, life: .38, max: .38, color, size: heavy ? 18 : 12 });
     impacts.push({ x: event.x, y: event.y, life: heavy ? .48 : .34, max: heavy ? .48 : .34, color, heavy });
@@ -104,28 +120,39 @@ function handleEvent(event) {
       screenShake = Math.max(screenShake, heavy ? .95 : .48);
       showBanner(heavy ? '好球！' : '接住了');
     }
-    playHitSound(heavy, event.side);
+    playHitSound(event);
+    haptics.play(event.side === 'player' ? (heavy ? 'heavy' : 'hit') : (heavy ? 'opponent-heavy' : 'opponent-hit'));
   } else if (event.type === 'wall') {
     particles.push({ x: event.x, y: event.y, life: .18, max: .18, color: '#f2bd45', size: 7 });
-    playWallSound();
+    playWallSound(event);
+    const nearPost = POSTS.some(([x, y]) => Math.hypot(event.x - x, event.y - y) <= RINK.puckRadius + RINK.postRadius + 1.5);
+    haptics.play(nearPost ? 'post' : 'wall');
   } else if (event.type === 'goal') {
     showBanner(event.side === 'player' ? '漂亮，得分！' : '别急，下一球');
     $('#goal-flash').classList.remove('show');
     void $('#goal-flash').offsetWidth;
     $('#goal-flash').classList.add('show');
     playGoalSound(event.side === 'player');
+    haptics.play(event.side === 'player' ? 'goal' : 'opponent-goal');
   } else if (event.type === 'serve') {
     renderOverlay();
     showBanner('开拍！');
     playServeSound();
+    haptics.play('serve');
   } else if (event.type === 'finish') {
     saveRecord(event.winner);
     playFinishSound(event.winner === 'player');
+    haptics.play(event.winner === 'player' ? 'win' : 'lose');
     setTimeout(() => { renderOverlay(); makeResultCard(event.winner); }, 80);
   } else if (event.type === 'deadball') {
     showBanner('球停了，重新发球');
+    haptics.play('deadball');
   } else if (event.type === 'pause' || event.type === 'resume') {
+    haptics.cancel();
+    haptics.play(event.type);
     renderOverlay();
+  } else if (event.type === 'start') {
+    haptics.play('start');
   }
   updateScoreboard();
 }
@@ -192,6 +219,8 @@ function startGame() {
 }
 
 function restartToReady() {
+  haptics.cancel();
+  haptics.play('restart');
   game.reset();
   trail.length = 0;
   particles.length = 0;
@@ -203,7 +232,7 @@ function restartToReady() {
 }
 
 function togglePause() {
-  if (game.phase === 'paused') game.resume();
+  if (game.phase === 'paused') { setupAudio(); game.resume(); }
   else game.pause();
   renderOverlay();
   updateScoreboard();
@@ -215,6 +244,10 @@ function fullscreenElement() {
 
 async function toggleFullscreen() {
   try {
+    if (window.AirHockeyNative?.setFullscreen) {
+      window.AirHockeyNative.setFullscreen(!nativeFullscreen);
+      return;
+    }
     if (fullscreenElement()) {
       const exit = document.exitFullscreen || document.webkitExitFullscreen;
       if (exit) await exit.call(document);
@@ -229,7 +262,8 @@ async function toggleFullscreen() {
 }
 
 function updateFullscreenButton() {
-  const active = Boolean(fullscreenElement());
+  const active = nativeFullscreen || Boolean(fullscreenElement());
+  document.documentElement.classList.toggle('immersive', active);
   const button = $('#fullscreen');
   button.textContent = active ? '×' : '⛶';
   button.setAttribute('aria-pressed', String(active));
@@ -238,9 +272,24 @@ function updateFullscreenButton() {
   resizeCanvas();
 }
 
+window.airHockeyNativeFullscreen = (active) => {
+  nativeFullscreen = Boolean(active);
+  updateFullscreenButton();
+};
+window.airHockeyNativePause = () => {
+  keys.clear();
+  pointerActive = false;
+  game.pause();
+  haptics.cancel();
+  audioContext?.suspend();
+};
+window.airHockeyNativeSaved = (saved, message) => showToast(message || (saved ? '战绩图已保存。' : '没有保存成功，请再试一次。'));
+if (window.AirHockeyNative) document.documentElement.classList.add('native-app');
+
 function setupAudio() {
   if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
   if (audioContext.state === 'suspended') audioContext.resume();
+  if (!sfx) sfx = createSfx(audioContext, { level: .6 }); // ≈ −4 dB: collisions sit above, not over, serve/goal cues
 }
 
 function getNoiseBuffer() {
@@ -281,17 +330,24 @@ function playNoise({ duration = .05, frequency = 1800, q = 1.8, gain = .04, at =
   } catch { /* browsers may block audio until a gesture */ }
 }
 
-function playHitSound(heavy, side) {
-  const pan = side === 'player' ? -.18 : .18;
-  // A short low body gives the mallet mass; the filtered noise is the hard surface.
-  playVoice({ start: heavy ? 180 : 145, end: heavy ? 74 : 92, duration: heavy ? .16 : .105, type: 'triangle', level: heavy ? .11 : .08, pan });
-  playNoise({ duration: heavy ? .075 : .045, frequency: heavy ? 1350 : 1850, q: heavy ? 1.4 : 2.5, gain: heavy ? .075 : .052, pan });
-  playVoice({ start: heavy ? 1450 : 1080, end: heavy ? 2360 : 1420, duration: heavy ? .12 : .055, type: 'square', level: heavy ? .025 : .014, at: .006, pan });
+function playHitSound(event) {
+  if (!soundOn) return;
+  try { setupAudio(); sfx.hit({ speed: event.speed, x: event.x, side: event.side }); } catch { /* browsers may block audio until a gesture */ }
 }
 
-function playWallSound() {
-  playNoise({ duration: .033, frequency: 2500, q: 3.8, gain: .026 });
-  playVoice({ start: 420, end: 210, duration: .045, type: 'triangle', level: .025 });
+const POSTS = [[0, 180], [0, 380], [1000, 180], [1000, 380]];
+
+function playWallSound(event) {
+  if (!soundOn) return;
+  try {
+    setupAudio();
+    const speed = Math.hypot(game.puck.vx, game.puck.vy);
+    // A puck sliding along a rail reports a contact every physics step; voice only distinct knocks.
+    if (audioContext.currentTime - lastWallSound < .045 && speed < 500) return;
+    lastWallSound = audioContext.currentTime;
+    const nearPost = POSTS.some(([x, y]) => Math.hypot(event.x - x, event.y - y) <= RINK.puckRadius + RINK.postRadius + 1.5);
+    sfx[nearPost ? 'post' : 'wall']({ speed, x: event.x });
+  } catch { /* browsers may block audio until a gesture */ }
 }
 
 function playServeSound() {
@@ -314,9 +370,17 @@ function playFinishSound(playerWon) {
 
 function canvasPoint(event) {
   const rect = canvas.getBoundingClientRect();
-  const viewX = (event.clientX - rect.left) / rect.width * (portraitView ? RINK.height : RINK.width);
-  const viewY = (event.clientY - rect.top) / rect.height * (portraitView ? RINK.width : RINK.height);
+  const { scale, offsetX, offsetY } = viewMetrics(rect);
+  const viewX = (event.clientX - rect.left - offsetX) / scale;
+  const viewY = (event.clientY - rect.top - offsetY) / scale;
   return portraitView ? { x: RINK.width - viewY, y: viewX } : { x: viewX, y: viewY };
+}
+
+function viewMetrics(rect) {
+  const width = portraitView ? RINK.height : RINK.width;
+  const height = portraitView ? RINK.width : RINK.height;
+  const scale = Math.min(rect.width / width, rect.height / height);
+  return { scale, offsetX: (rect.width - width * scale) / 2, offsetY: (rect.height - height * scale) / 2 };
 }
 
 function setPointerTarget(event) {
@@ -335,7 +399,7 @@ function updateKeyboard(dt) {
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  portraitView = rect.width < 700 && rect.height > rect.width;
+  portraitView = rect.height > rect.width;
   canvas.width = Math.max(1, Math.round(rect.width * dpr));
   canvas.height = Math.max(1, Math.round(rect.height * dpr));
 }
@@ -351,9 +415,8 @@ function render() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const viewWidth = portraitView ? RINK.height : RINK.width;
-  const viewHeight = portraitView ? RINK.width : RINK.height;
-  ctx.setTransform(dpr * rect.width / viewWidth, 0, 0, dpr * rect.height / viewHeight, 0, 0);
+  const { scale, offsetX, offsetY } = viewMetrics(rect);
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * offsetX, dpr * offsetY);
   if (portraitView) { ctx.translate(0, RINK.width); ctx.rotate(-Math.PI / 2); }
   const shake = screenShake * 7;
   ctx.translate(Math.sin(visualTime * 77) * shake, Math.cos(visualTime * 61) * shake * .7);
@@ -469,21 +532,28 @@ function makeResultCard(winner) {
 
 function openShareDialog() { if (game.phase === 'finished') { makeResultCard(game.lastScorer); $('#share-dialog').showModal(); } }
 
-document.querySelectorAll('[data-level]').forEach((button) => button.addEventListener('click', () => setLevel(button.dataset.level)));
+document.querySelectorAll('[data-level]').forEach((button) => button.addEventListener('click', () => { if (game.phase === 'ready') haptics.play('select'); setLevel(button.dataset.level); }));
 $('#overlay').addEventListener('click', (event) => { const action = event.target.closest('[data-action]')?.dataset.action; if (action === 'start') startGame(); if (action === 'restart') startGame(); if (action === 'resume') togglePause(); if (action === 'share') openShareDialog(); });
 $('#pause').addEventListener('click', togglePause);
-$('#fullscreen').addEventListener('click', toggleFullscreen);
+$('#fullscreen').addEventListener('click', () => { haptics.play('fullscreen'); void toggleFullscreen(); });
 $('#restart').addEventListener('click', () => { if (game.phase === 'finished') startGame(); else restartToReady(); });
 $('#rules-button').addEventListener('click', () => $('#rules-dialog').showModal());
+$('#download-card').addEventListener('click', (event) => {
+  if (window.AirHockeyNative?.saveImage) {
+    event.preventDefault();
+    window.AirHockeyNative.saveImage($('#result-image').src);
+  }
+});
 document.querySelectorAll('.dialog-close, .dialog-close-button').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
 $('#sound').addEventListener('click', () => { soundOn = !soundOn; $('#sound').setAttribute('aria-pressed', String(soundOn)); $('#sound').setAttribute('aria-label', soundOn ? '关闭音效' : '开启音效'); if (soundOn) { setupAudio(); playVoice({ start: 440, end: 560, duration: .09, level: .05 }); } });
+hapticsButton.addEventListener('click', () => { hapticsOn = !hapticsOn; hapticsButton.setAttribute('aria-pressed', String(hapticsOn)); hapticsButton.setAttribute('aria-label', hapticsOn ? '关闭触感' : '开启触感'); hapticsButton.title = hapticsOn ? '关闭触感' : '开启触感'; haptics.setEnabled(hapticsOn); if (hapticsOn) haptics.play('toggle'); });
 canvas.addEventListener('pointerdown', (event) => { pointerActive = true; canvas.setPointerCapture?.(event.pointerId); setPointerTarget(event); setupAudio(); });
-canvas.addEventListener('pointermove', (event) => { if (pointerActive) setPointerTarget(event); });
+canvas.addEventListener('pointermove', (event) => { if (event.pointerType === 'mouse' || pointerActive) setPointerTarget(event); });
 canvas.addEventListener('pointerup', (event) => { pointerActive = false; canvas.releasePointerCapture?.(event.pointerId); });
 canvas.addEventListener('pointercancel', () => { pointerActive = false; });
 window.addEventListener('keydown', (event) => { const key = event.key.toLowerCase(); if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d',' '].includes(key)) event.preventDefault(); if (key === ' ') { togglePause(); return; } keys.add(key); setupAudio(); });
 window.addEventListener('keyup', (event) => keys.delete(event.key.toLowerCase()));
-document.addEventListener('visibilitychange', () => { if (document.hidden && game.phase === 'playing') { game.pause(); renderOverlay(); updateScoreboard(); showToast('页面已暂停，回来后继续。'); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { window.airHockeyNativePause(); renderOverlay(); updateScoreboard(); } });
 window.addEventListener('resize', resizeCanvas);
 document.addEventListener('fullscreenchange', updateFullscreenButton);
 document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
@@ -503,4 +573,7 @@ function frame(now) {
 }
 
 $('#sound').setAttribute('aria-pressed', String(soundOn)); $('#sound').setAttribute('aria-label', soundOn ? '关闭音效' : '开启音效');
-updateRecord(); void loadToyRecord(); setLevel('standard'); resizeCanvas(); updateFullscreenButton(); renderOverlay(); updateScoreboard(); requestAnimationFrame(frame);
+if (haptics.available()) { hapticsButton.hidden = false; hapticsButton.setAttribute('aria-pressed', 'true'); hapticsButton.setAttribute('aria-label', '关闭触感'); hapticsButton.title = '关闭触感'; }
+const cloudReady = loadToyRecord();
+new ResizeObserver(resizeCanvas).observe(stage);
+updateRecord(); setLevel('standard'); resizeCanvas(); updateFullscreenButton(); renderOverlay(); updateScoreboard(); requestAnimationFrame(frame);

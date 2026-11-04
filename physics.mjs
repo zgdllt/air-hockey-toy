@@ -13,6 +13,9 @@ const STEP = 1 / 240;
 const PLAYER_FOLLOW_RATE = 55; // Fast arcade response; unlike the robot servo, this is input feel.
 const PLAYER_SWEEP_SPEED = 7200; // Position sweep cap; keeps a discrete step from skipping contact.
 const PLAYER_IMPACT_SPEED = 3600; // Keep cursor jumps from creating infinite hit impulse.
+const OPPONENT_FOLLOW_RATE = 55;
+const OPPONENT_SWEEP_SPEED = 7200;
+const OPPONENT_IMPACT_SPEED = 3600;
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
 function move(body, target, speed, dt) {
@@ -43,6 +46,7 @@ export class AirHockey {
     this.timer = 0;
     this.accumulator = 0;
     this.lastScorer = null;
+    this.multiplayer = false;
     this.resetPositions();
   }
 
@@ -71,6 +75,16 @@ export class AirHockey {
     this.target.y = clamp(y, r + 5, RINK.height - r - 5);
   }
 
+  setOpponentTarget(x, y) {
+    const r = RINK.malletRadius;
+    this.aiTarget.x = clamp(x, RINK.width / 2 + r + 8, RINK.width - r - 5);
+    this.aiTarget.y = clamp(y, r + 5, RINK.height - r - 5);
+  }
+
+  setMultiplayer(enabled = true) {
+    this.multiplayer = Boolean(enabled);
+  }
+
   followPlayer(dt) {
     const previousX = this.player.x, previousY = this.player.y;
     const amount = 1 - Math.exp(-PLAYER_FOLLOW_RATE * dt);
@@ -92,6 +106,24 @@ export class AirHockey {
     // collision impulse. Pointer jumps must not become infinite power shots.
     this.player.vx = clamp((this.player.x - previousX) / dt, -PLAYER_IMPACT_SPEED, PLAYER_IMPACT_SPEED);
     this.player.vy = clamp((this.player.y - previousY) / dt, -PLAYER_IMPACT_SPEED, PLAYER_IMPACT_SPEED);
+  }
+
+  followOpponent(dt) {
+    const previousX = this.computer.x, previousY = this.computer.y;
+    const amount = 1 - Math.exp(-OPPONENT_FOLLOW_RATE * dt);
+    let deltaX = (this.aiTarget.x - this.computer.x) * amount;
+    let deltaY = (this.aiTarget.y - this.computer.y) * amount;
+    const deltaLength = Math.hypot(deltaX, deltaY);
+    const maxDelta = OPPONENT_SWEEP_SPEED * dt;
+    if (deltaLength > maxDelta) {
+      const scale = maxDelta / deltaLength;
+      deltaX *= scale;
+      deltaY *= scale;
+    }
+    this.computer.x += deltaX;
+    this.computer.y += deltaY;
+    this.computer.vx = clamp((this.computer.x - previousX) / dt, -OPPONENT_IMPACT_SPEED, OPPONENT_IMPACT_SPEED);
+    this.computer.vy = clamp((this.computer.y - previousY) / dt, -OPPONENT_IMPACT_SPEED, OPPONENT_IMPACT_SPEED);
   }
 
   pause() {
@@ -131,6 +163,7 @@ export class AirHockey {
     if (this.phase === 'countdown' || this.phase === 'goal') {
       this.timer -= dt;
       if (this.phase === 'countdown') this.followPlayer(dt);
+      if (this.phase === 'countdown' && this.multiplayer) this.followOpponent(dt);
       if (this.timer <= 0) {
         if (this.phase === 'goal') {
           this.resetPositions();
@@ -142,9 +175,10 @@ export class AirHockey {
     }
     if (this.phase !== 'playing') return;
     this.stats.time += dt;
-    this.think(dt);
+    if (this.multiplayer) this.followOpponent(dt);
+    else this.think(dt);
     this.followPlayer(dt);
-    move(this.computer, this.aiTarget, LEVELS[this.difficulty].speed, dt);
+    if (!this.multiplayer) move(this.computer, this.aiTarget, LEVELS[this.difficulty].speed, dt);
     const p = this.puck;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
