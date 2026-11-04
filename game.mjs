@@ -209,6 +209,35 @@ function togglePause() {
   updateScoreboard();
 }
 
+function fullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+async function toggleFullscreen() {
+  try {
+    if (fullscreenElement()) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) await exit.call(document);
+      return;
+    }
+    const request = document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen;
+    if (!request) { showToast('当前浏览器不支持全屏模式。'); return; }
+    await request.call(document.documentElement);
+  } catch {
+    showToast('浏览器没有允许全屏，请使用地址栏或系统菜单进入。');
+  }
+}
+
+function updateFullscreenButton() {
+  const active = Boolean(fullscreenElement());
+  const button = $('#fullscreen');
+  button.textContent = active ? '×' : '⛶';
+  button.setAttribute('aria-pressed', String(active));
+  button.setAttribute('aria-label', active ? '退出全屏' : '进入全屏');
+  button.title = active ? '退出全屏' : '进入全屏';
+  resizeCanvas();
+}
+
 function setupAudio() {
   if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
   if (audioContext.state === 'suspended') audioContext.resume();
@@ -443,6 +472,7 @@ function openShareDialog() { if (game.phase === 'finished') { makeResultCard(gam
 document.querySelectorAll('[data-level]').forEach((button) => button.addEventListener('click', () => setLevel(button.dataset.level)));
 $('#overlay').addEventListener('click', (event) => { const action = event.target.closest('[data-action]')?.dataset.action; if (action === 'start') startGame(); if (action === 'restart') startGame(); if (action === 'resume') togglePause(); if (action === 'share') openShareDialog(); });
 $('#pause').addEventListener('click', togglePause);
+$('#fullscreen').addEventListener('click', toggleFullscreen);
 $('#restart').addEventListener('click', () => { if (game.phase === 'finished') startGame(); else restartToReady(); });
 $('#rules-button').addEventListener('click', () => $('#rules-dialog').showModal());
 document.querySelectorAll('.dialog-close, .dialog-close-button').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
@@ -455,6 +485,8 @@ window.addEventListener('keydown', (event) => { const key = event.key.toLowerCas
 window.addEventListener('keyup', (event) => keys.delete(event.key.toLowerCase()));
 document.addEventListener('visibilitychange', () => { if (document.hidden && game.phase === 'playing') { game.pause(); renderOverlay(); updateScoreboard(); showToast('页面已暂停，回来后继续。'); } });
 window.addEventListener('resize', resizeCanvas);
+document.addEventListener('fullscreenchange', updateFullscreenButton);
+document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
 
 function frame(now) {
   const dt = Math.min(.05, Math.max(0, (now - lastFrame) / 1000)); lastFrame = now;
@@ -471,4 +503,4 @@ function frame(now) {
 }
 
 $('#sound').setAttribute('aria-pressed', String(soundOn)); $('#sound').setAttribute('aria-label', soundOn ? '关闭音效' : '开启音效');
-updateRecord(); void loadToyRecord(); setLevel('standard'); resizeCanvas(); renderOverlay(); updateScoreboard(); requestAnimationFrame(frame);
+updateRecord(); void loadToyRecord(); setLevel('standard'); resizeCanvas(); updateFullscreenButton(); renderOverlay(); updateScoreboard(); requestAnimationFrame(frame);
