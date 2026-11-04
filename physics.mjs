@@ -11,6 +11,7 @@ export const LEVELS = Object.freeze({
 
 const STEP = 1 / 240;
 const PLAYER_FOLLOW_RATE = 55; // Fast arcade response; unlike the robot servo, this is input feel.
+const PLAYER_SWEEP_SPEED = 7200; // Position sweep cap; keeps a discrete step from skipping contact.
 const PLAYER_IMPACT_SPEED = 3600; // Keep cursor jumps from creating infinite hit impulse.
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
@@ -73,8 +74,20 @@ export class AirHockey {
   followPlayer(dt) {
     const previousX = this.player.x, previousY = this.player.y;
     const amount = 1 - Math.exp(-PLAYER_FOLLOW_RATE * dt);
-    this.player.x += (this.target.x - this.player.x) * amount;
-    this.player.y += (this.target.y - this.player.y) * amount;
+    let deltaX = (this.target.x - this.player.x) * amount;
+    let deltaY = (this.target.y - this.player.y) * amount;
+    // A discrete collision step must not sweep the mallet through the puck.
+    // The puck can move at most ~8 px per 240 Hz step, so this 30 px cap keeps
+    // the combined relative travel below the 106 px contact diameter.
+    const deltaLength = Math.hypot(deltaX, deltaY);
+    const maxDelta = PLAYER_SWEEP_SPEED * dt;
+    if (deltaLength > maxDelta) {
+      const scale = maxDelta / deltaLength;
+      deltaX *= scale;
+      deltaY *= scale;
+    }
+    this.player.x += deltaX;
+    this.player.y += deltaY;
     // Keep visual following responsive while bounding the velocity used for
     // collision impulse. Pointer jumps must not become infinite power shots.
     this.player.vx = clamp((this.player.x - previousX) / dt, -PLAYER_IMPACT_SPEED, PLAYER_IMPACT_SPEED);
