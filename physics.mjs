@@ -10,6 +10,8 @@ export const LEVELS = Object.freeze({
 });
 
 const STEP = 1 / 240;
+const PLAYER_FOLLOW_RATE = 55; // Fast arcade response; unlike the robot servo, this is input feel.
+const PLAYER_IMPACT_SPEED = 3600; // Keep cursor jumps from creating infinite hit impulse.
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
 function move(body, target, speed, dt) {
@@ -68,6 +70,17 @@ export class AirHockey {
     this.target.y = clamp(y, r + 5, RINK.height - r - 5);
   }
 
+  followPlayer(dt) {
+    const previousX = this.player.x, previousY = this.player.y;
+    const amount = 1 - Math.exp(-PLAYER_FOLLOW_RATE * dt);
+    this.player.x += (this.target.x - this.player.x) * amount;
+    this.player.y += (this.target.y - this.player.y) * amount;
+    // Keep visual following responsive while bounding the velocity used for
+    // collision impulse. Pointer jumps must not become infinite power shots.
+    this.player.vx = clamp((this.player.x - previousX) / dt, -PLAYER_IMPACT_SPEED, PLAYER_IMPACT_SPEED);
+    this.player.vy = clamp((this.player.y - previousY) / dt, -PLAYER_IMPACT_SPEED, PLAYER_IMPACT_SPEED);
+  }
+
   pause() {
     if (!['playing', 'countdown', 'goal'].includes(this.phase)) return;
     this.pausedFrom = this.phase;
@@ -104,7 +117,7 @@ export class AirHockey {
   step(dt) {
     if (this.phase === 'countdown' || this.phase === 'goal') {
       this.timer -= dt;
-      if (this.phase === 'countdown') move(this.player, this.target, 1450, dt);
+      if (this.phase === 'countdown') this.followPlayer(dt);
       if (this.timer <= 0) {
         if (this.phase === 'goal') {
           this.resetPositions();
@@ -117,7 +130,7 @@ export class AirHockey {
     if (this.phase !== 'playing') return;
     this.stats.time += dt;
     this.think(dt);
-    move(this.player, this.target, 1450, dt);
+    this.followPlayer(dt);
     move(this.computer, this.aiTarget, LEVELS[this.difficulty].speed, dt);
     const p = this.puck;
     p.x += p.vx * dt;
