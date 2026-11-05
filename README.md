@@ -45,7 +45,7 @@ python3 -m http.server 8123
 
 Elo 与战绩持久保存到 CloudBase PostgreSQL，服务器计算排位物理与结果。初始 1000 / K=32，匹配先选积分接近的在线真人，再随等待放宽差距；取消排队不扣分，已开始后主动退出判负，断线有 20 秒重连宽限。好友房间不计排位。服务器重启后未完成比赛作废，既有战绩保留。练习成绩来自客户端，不能用来增加 Elo。
 
-Toy 预览无法完整验证正式作品的私有云存档授权。完整关联入口需更新后的正式 Toy 页面可用；发布和验收状态见 `docs/LADDER.md`（sim2sim 工作区为 `docs/LADDER.md`）。
+Toy 预览无法完整验证正式作品的私有云存档授权。正式 Toy 已更新并支持 App 关联；发布和验收状态见 `docs/LADDER.md`（sim2sim 工作区为 `docs/LADDER.md`）。
 
 ## 原生应用
 
@@ -54,3 +54,5 @@ Toy 预览无法完整验证正式作品的私有云存档授权。完整关联�
 `haptics.mjs` 统一 20 种事件和节奏，包含双方击球/重击、连续好球 combo、门柱/侧壁、进球/失分、发球、胜负和比赛控制。Android 优先 MiHaptic、兼容时使用 VibrationEffect；Mac 通过 NSHapticFeedbackManager 映射。设备的触感能力不同，统一事件并不意味着物理振幅相同。应用暂停或关闭触感时取消待执行效果。
 
 Mac 发布包为 Apple Silicon / Intel 通用 DMG，最低部署目标 macOS 13；本次实机验证为 Apple Silicon。当前未做 Apple Developer ID 签名和公证，首次下载打开可能需要按「系统设置 → 隐私与安全性 → 仍要打开」确认。Android 最低 API 26，需要允许安装下载的 APK。具体构建与验证方法见各 App 的 README。
+
+Android 0.4.1 的授权入口优先打开已安装的 B站 App；未安装时打开系统浏览器，需要在该浏览器内登录 B站。重开原生 App 后点击排位，会读回已经保存的赛号。

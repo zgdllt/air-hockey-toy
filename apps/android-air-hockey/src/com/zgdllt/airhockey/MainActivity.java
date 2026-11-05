@@ -264,6 +264,14 @@ public final class MainActivity extends Activity {
                 if (!hasWindowFocus()) return;
                 Uri target = Uri.parse("https://www.bilibili.com/toy/yi-pai-ji-he-air-hockey/index.html")
                         .buildUpon().appendQueryParameter("link", code.toUpperCase(java.util.Locale.ROOT)).build();
+                Uri inBilibili = Uri.parse("bilibili://browser").buildUpon()
+                        .appendQueryParameter("url", target.toString()).build();
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, inBilibili).setPackage("tv.danmaku.bili"));
+                    return;
+                } catch (android.content.ActivityNotFoundException ignored) {
+                    // External browsers can complete the same official Toy flow.
+                }
                 try { startActivity(new Intent(Intent.ACTION_VIEW, target)); }
                 catch (android.content.ActivityNotFoundException error) {
                     android.widget.Toast.makeText(MainActivity.this, "请在 B站 Toy 打开一拍即合并输入授权码", android.widget.Toast.LENGTH_LONG).show();

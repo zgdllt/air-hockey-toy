@@ -1,16 +1,16 @@
 # Air Hockey 原生发行记录
 
 日期：2026-11-05（本机 Asia/Shanghai）。
-当前状态：v0.3.0 网页、APK 与 DMG 已公开发布并核对远端文件。Mac 构建版运行验证通过并已更新本机安装，安装后的前台复测已通过，Android 实机复测按用户要求暂缓。下文 v0.2.0 与 v0.2.1 记录保留为对应版本历史。
+本记录覆盖当前版本 v0.4.1 / code 6，正式 Toy 已更新并完成真实 B站私有云档 → 小米 App 关联；Android 授权优先在 B站 App 打开。本机 Mac 和小米均已升级，详情以排行榜与排位记录为准。下文较旧版本按各自当时范围保留。
 
-v0.4.0 / code 5 的云档关联、分榜与排位候选已构建并安装；27 项运行资源、APK 签名及 DMG 挂载读回通过。Mac 原生排位 / 安装版复测，以及重新连接的小米实机 MiHaptic / 排位 / 全屏复测通过。Toy 最终预览验收通过、尚待用户确认提交审核；GitHub 发行状态见 [v0.4.0](https://github.com/zgdllt/air-hockey-toy/releases/tag/v0.4.0)。当前状态与证据以 [排行榜与排位记录](LADDER.md) 为准。
+v0.4.0 / code 5 的云档关联、分榜与排位候选已构建并安装；27 项运行资源、APK 签名及 DMG 挂载读回通过。Mac 原生排位 / 安装版复测，以及重新连接的小米实机 MiHaptic / 排位 / 全屏复测通过。Toy 最终预览验收通过、已由用户确认提交并通过审核上线；GitHub v0.4.0 网页和预发布安装包已公开并回读验证。当前状态与证据以 [排行榜与排位记录](LADDER.md) 为准。
 
 网页与安装包公开入口：
 
 - 在线玩：<https://zgdllt.github.io/air-hockey-toy/>
-- APK / DMG：<https://github.com/zgdllt/air-hockey-toy/releases/tag/v0.3.0>
+- APK / DMG：<https://github.com/zgdllt/air-hockey-toy/releases/tag/v0.4.1>
 
-## 交付范围
+## v0.2.0 单机发行范围（历史）
 
 同一份二维街机游戏发布为 GitHub Pages 网页、Android APK 与 macOS 通用 DMG。应用包含游戏、用户更新的共享碰撞音效、互动宣传片、原始 30 秒成片及平台图标；不要求玩家安装开发工具。远程联机由其他开发工作单独推进，不包含在这个单机发行包中。
 

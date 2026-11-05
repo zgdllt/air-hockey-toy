@@ -1,6 +1,6 @@
 # Air Hockey v0.4.0 排行榜与排位
 
-2026-11-05。状态：v0.4.0 / code 5 已实现；真实 PG、公网 WSS、浏览器、Mac 和小米原生实机及包体检查通过。Toy 新预览已生成，尚未提交本次审核；GitHub 发行状态见 [v0.4.0](https://github.com/zgdllt/air-hockey-toy/releases/tag/v0.4.0)。
+2026-11-05。状态：v0.4.0 / code 5 已实现；真实 PG、公网 WSS、浏览器、Mac 和小米原生实机及包体检查通过。正式 Toy 已通过审核并上线；GitHub v0.4.0 网页和预发布安装包已公开并回读验证。
 
 ## 用户确认与范围
 
@@ -40,7 +40,7 @@ PG 业务表与 RPC 仅授权 service_role，启用 RLS 并撤销 anon / authent
 
 ## 当前验证与交付
 
-- 新预览：<https://www.bilibili.com/toy/preview/author_AxtkQAJL/index.html>。目标仍为作品 `51810219857920`、`yi-pai-ji-he-air-hockey`，封面 / 图标 / 公开可见性保留。正式页面暂为此前已发布的单人版；App 的真实 B站云档关联须待新 Toy 上线后验证，不能把预览或诊断 authorizer 当作真实 B站登录。
+- 新预览：<https://www.bilibili.com/toy/preview/author_AxtkQAJL/index.html>。目标仍为作品 `51810219857920`、`yi-pai-ji-he-air-hockey`，封面 / 图标 / 公开可见性保留。正式页面已更新为本版；真实 B站私有云档与小米 App 的关联另见末尾实机记录，预览或诊断 authorizer 本身仍不等于真实 B站登录。
 - 真实 PG：`pg-integration.json` 通过。9 胜 / 10 局为 90%，再输一局后胜率降低；最高连胜 9 / 当前 0；重复练习成绩和并发排位终局均幂等；新客户端恢复 1016 分；重启恢复遗留局作废，不改积分；live 榜未写测试成绩。
 - 服务 version004 已正常发布、100% 流量，沿用 version003 的修补依赖镜像并切到正式 `live` scope；运行资源仍为 0.25 vCPU / 0.5 GB、0–1 实例。公网 `public-competition-test.json` 通过：两个排位客户端进入比赛，主动退出判负，积分 984 / 1016，并实际读回档案和榜单。所有计分测试使用独立 `public_verification_20261105` scope；正式隔离检查见 `live-service-verify.json`。
 - 浏览器：`browser-test.json` 通过，练习三类榜、设备关联、同账号自匹配拒绝、两端排位结算、云档重载恢复积分，无页面错误。Toy 身份 API 使用契约夹具；后端为真实 PG + 本地 WebSocket，不声称已验真实 B站账号授权。
@@ -51,3 +51,22 @@ PG 业务表与 RPC 仅授权 service_role，启用 RLS 并撤销 anon / authent
 - 发布源位于隔离 checkout `release-source/`，使用明确源码 allowlist。宣传片采用已公开 v0.3.0 的 30 秒 MP4 / 配套资源快照；没有回退或混入工作区另一项正在进行的长版宣传片修改。
 
 以上证据在本机 `.runtime/air-hockey-ladder-0.4.0/`。Mac 的原生 performer 调用与主观触感分别验收；两个客户端公网开局不代表两位真人跨地域的延迟体验已经验证。
+
+
+## GitHub v0.4.0 预发布历史
+
+- 网页：<https://zgdllt.github.io/air-hockey-toy/>。Pages `42053947250` 成功，提交 `2423da83d6abdd77ffb7bb831e44c45be32fc759`；27 项公开资源 SHA-256 与冻结源一致。桌面 / 竖屏实际开局、全屏等比 / Canvas 绘制、正式空 Elo 榜读取通过，无页面错误。
+- 预发布：<https://github.com/zgdllt/air-hockey-toy/releases/tag/v0.4.0>。六个附件均已重新下载并逐项核对 SHA-256，含 APK、通用 DMG、72 文件源码快照及校验清单。此条保留当时的预发布状态；后续 v0.4.1 已补上安卓授权入口修正。
+- Mac `/Applications/AirHockey.app` 与手机实际安装 APK 均为本次 0.4.0 候选；Mac 对照工具保留，Android 普通启动无调试 socket，原本地存档恢复并读回一致。
+- 本次 Toy 已通过审核并上线。真实 B站云档关联的后续验收见下一节；此前的预览 / 诊断 authorizer 结果仅覆盖各自记录的范围。
+
+
+## v0.4.1 授权入口与真实 B站存档
+
+Toy `51810219857920` 已由用户确认提交并通过审核，正式页面包含排位 / 云档关联。小米实际在 B站 App 的官方 Toy 创建 / 读回私有存档并批准设备，原生 App 收到相同公开赛号与 1000 Elo，凭证存在于 App 私有本地存储，未导出到日志。证据：`real-bilibili-link.json` 与官方页面截图（本地保留，不发布用户数据）。
+
+外部 Edge 首次出现父宿主 SDK 握手超时，刷新后接口实际返回 `-101 未登录`。已排除游戏加载位置 / Toy ID 错误；不伪造 SDK 握手或绕过官方身份流程。v0.4.1 / code 6 在 Android 优先使用已安装的 B站 App 打开固定官方授权页；没有可用 B站 App 才回退 HTTPS 系统浏览器，浏览器需要自己的 B站登录态。权限与前台 / 6 位码守卫不变。
+
+升级后会保留原有赛号凭证。应用按需读档：重开后点击排位，客户端读回已有凭证并恢复赛号，不要求重新注册或输入恢复码。0.4.1 只修原生授权入口及发行号，27 项 Web 资源与已上线 Toy 完全一致，无需上传另一份 Toy 包。
+
+补丁证据位于 `.runtime/air-hockey-auth-0.4.1/`：Android 升级后用生产客户端读取已存真实凭证并从正式服务恢复相同赛号、原生桥实际优先进入 B站 App、返回及关闭调试；Mac DMG 挂载 / 安装后签名和包体一致，图标与触感对照工具保留。完整排位 / 20 类触感证据沿用相同资源的 v0.4.0 已验证记录。GitHub 发行状态以 v0.4.1 Release 为准。
