@@ -11,6 +11,8 @@ npm install
 npm start
 ```
 
+上述无数据库模式仅提供好友房间。启用 v0.4.0 排位需要先在现有 CloudBase PostgreSQL 应用 `cloudbase/migrations/20261105114215_air_hockey_ladder.sql`，再通过私有运行环境配置 `TCB_ENV`、专用服务 `CLOUDBASE_APIKEY`、`COMPETITION_SCOPE`（正式为 `live`）。不要把服务密钥放入源码、浏览器、客户端存档或日志。使用官方 Node SDK 的 PostgreSQL RPC，不借用本地 CLI 登录凭据。测试必须使用独立 scope。
+
 健康检查：`http://127.0.0.1:8080/healthz`。WebSocket 地址：`ws://127.0.0.1:8080/ws`。微信真机必须使用公网 `wss://` 地址，并在小游戏后台配置合法 Socket 域名；本地开发工具可以按微信开发者工具的网络校验选项调试，不能把这个例外当成上线配置。
 
 ## 协议
@@ -30,3 +32,11 @@ npm start
 服务使用内存房间，必须保持最多 1 实例；重启会丢失房间。常规离开立即释放席位，剩余玩家回到等待状态；有 ping/pong 心跳、输入序列拒旧、16 KiB 消息上限和 128 KiB 发送队列保护。终局发送完整快照，双方重新准备可重开。
 
 `node --test server.test.mjs` 验证服务端权威分数、终局、共同暂停、重开、补位和重复创建不泄漏房间。公网两条独立 WSS 连接已实际击球、进球并核对相同快照，两个真实 Toy iframe 上下文也已开局并验证断线提示。证据见 `.runtime/air-hockey-social-0.3.0/`。当前未验证两名真人跨地域网络条件下的手感，也不把原生 API 调用当作物理触感验收。
+
+## v0.4.0 排位与持久战绩
+
+新增 `service.request` 业务 RPC、`account.login`、`queue.join` / `queue.cancel`、`ranked.result`。B站私有 Toy 存档保存服务器签发的游戏凭证，App 通过一次性设备授权关联；服务端只保存凭证的 SHA-256 摘要。凭证证明游戏账户持有关系，不是 B站平台签名凭证。公开榜仅显示生成的赛号，好友房间仍不计分。
+
+Elo 从 1000 起、K=32、整数零和；按积分差及等待时长选双人真人对手。同一账号不能自匹配或同时占多个比赛。开始前落库，终局在单个事务中幂等结算双方 Elo / 胜率 / 连胜 / 胜局。主动退出判负；断线 20 秒可恢复原局；后台共同暂停至多 60 秒；双方都离线或服务器重启遗留未完成局则作废。数据库失败保留待结算状态并退避重试，不以内存数据冒充成功。
+
+业务表启用 RLS，直接 anon / authenticated 访问被撤销；只有服务端 service_role 可用业务 RPC。`npm test` 覆盖 Elo、匹配、周期、好友回归及排位取消 / 结算重试 / 断线恢复。真实 PG 与公网 WSS 证据、当前部署状态见项目 `docs/LADDER.md`（sim2sim 工作区为 `docs/LADDER.md`）。

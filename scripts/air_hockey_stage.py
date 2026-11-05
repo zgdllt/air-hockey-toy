@@ -14,7 +14,7 @@ target = Path(sys.argv[1])
 target.mkdir(parents=True, exist_ok=True)
 if any(target.iterdir()):
     raise SystemExit('Staging directory must be empty')
-files = ['index.html', 'styles.css', 'game.mjs', 'combo.mjs', 'platform.mjs', 'leaderboard.mjs', 'online.mjs', 'online-config.mjs', 'physics.mjs', 'sfx.mjs', 'haptics.mjs', 'icon.svg']
+files = ['index.html', 'styles.css', 'game.mjs', 'combo.mjs', 'platform.mjs', 'leaderboard.mjs', 'competition-client.mjs', 'online.mjs', 'online-config.mjs', 'physics.mjs', 'sfx.mjs', 'haptics.mjs', 'icon.svg']
 files += ['promo/' + name for name in ['index.html', 'film.html', 'player.mjs', 'promo.mjs', 'timeline.mjs', 'rally.mjs', 'scene.mjs', 'camera3d.mjs', 'overlay.mjs', 'audio.mjs', 'toy.mjs', 'toycard.mjs']]
 files += ['promo/dist/air-hockey-collision-promo.mp4']
 files += ['promo/assets/voiceover-toy.wav']

@@ -40,6 +40,8 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
 
 final class HapticMessageHandler: NSObject, WKScriptMessageHandler {
     private var pending: [DispatchWorkItem] = []
+    private(set) var diagnosticCounts: [String: Int] = [:]
+    private let diagnosing = CommandLine.arguments.contains("--smoke-test")
     func cancel() { pending.forEach { $0.cancel() }; pending.removeAll() }
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.frameInfo.isMainFrame, message.frameInfo.request.url?.host == "bundle",
@@ -51,8 +53,11 @@ final class HapticMessageHandler: NSObject, WKScriptMessageHandler {
             guard let at = pulse["at"] as? Double, let intensity = pulse["intensity"] as? Double,
                   let sharpness = pulse["sharpness"] as? Double else { continue }
             let pattern: NSHapticFeedbackManager.FeedbackPattern = intensity >= 0.8 ? .levelChange : (intensity <= 0.42 || sharpness >= 0.95 ? .alignment : .generic)
-            let work = DispatchWorkItem {
-                if NSApp.isActive { NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: .now) }
+            let work = DispatchWorkItem { [weak self] in
+                if NSApp.isActive {
+                    NSHapticFeedbackManager.defaultPerformer.perform(pattern, performanceTime: .now)
+                    if let self, self.diagnosing { self.diagnosticCounts[kind, default: 0] += 1 }
+                }
             }
             pending.append(work)
             DispatchQueue.main.asyncAfter(deadline: .now() + at / 1000, execute: work)
@@ -66,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
     var webView: WKWebView!
     private(set) var lastSavedImage: URL?
     private let haptics = HapticMessageHandler()
+    var hapticCounts: [String: Int] { haptics.diagnosticCounts }
     private var smoke: SmokeTest?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -77,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
           fullscreen: false,
           getFullscreen() { return this.fullscreen; },
           setFullscreen(value) { window.webkit.messageHandlers.macWindow.postMessage({action:'fullscreen', value:!!value}); },
+          openToyAuthorization(code) { window.webkit.messageHandlers.macWindow.postMessage({action:'toyAuth', code}); },
           saveImage(data) { window.webkit.messageHandlers.macWindow.postMessage({action:'saveImage', data}); }
         };
         window.__airHockeyErrors = [];
@@ -85,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         """
         controller.addUserScript(WKUserScript(source: bootstrap, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let configuration = WKWebViewConfiguration()
+        if CommandLine.arguments.contains("--smoke-test") { configuration.websiteDataStore = .nonPersistent() }
         configuration.userContentController = controller
         configuration.setURLSchemeHandler(AssetSchemeHandler(root: Bundle.main.resourceURL!.appendingPathComponent("web")), forURLScheme: "toyasset")
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -126,6 +134,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
             } catch {
                 lastSavedImage = nil
                 webView.evaluateJavaScript("window.airHockeyNativeSaved?.(false, '保存失败，请检查下载文件夹的访问权限。')")
+            }
+            return
+        }
+        if body["action"] as? String == "toyAuth" {
+            guard NSApp.isActive, let code = body["code"] as? String, code.count == 6,
+                  code.range(of: "^[A-Fa-f0-9]{6}$", options: .regularExpression) != nil else { return }
+            var target = URLComponents(string: "https://www.bilibili.com/toy/yi-pai-ji-he-air-hockey/index.html")!
+            target.queryItems = [URLQueryItem(name: "link", value: code.uppercased())]
+            if let url = target.url, !NSWorkspace.shared.open(url) {
+                webView.evaluateJavaScript("window.airHockeyNativeAuthFailed?.()")
             }
             return
         }

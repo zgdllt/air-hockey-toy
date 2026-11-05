@@ -258,6 +258,19 @@ public final class MainActivity extends Activity {
         @JavascriptInterface
         public void setFullscreen(final boolean value) { runOnUiThread(() -> MainActivity.this.setFullscreen(value)); }
         @JavascriptInterface
+        public void openToyAuthorization(final String code) {
+            if (code == null || !code.matches("[A-Fa-f0-9]{6}")) return;
+            runOnUiThread(() -> {
+                if (!hasWindowFocus()) return;
+                Uri target = Uri.parse("https://www.bilibili.com/toy/yi-pai-ji-he-air-hockey/index.html")
+                        .buildUpon().appendQueryParameter("link", code.toUpperCase(java.util.Locale.ROOT)).build();
+                try { startActivity(new Intent(Intent.ACTION_VIEW, target)); }
+                catch (android.content.ActivityNotFoundException error) {
+                    android.widget.Toast.makeText(MainActivity.this, "请在 B站 Toy 打开一拍即合并输入授权码", android.widget.Toast.LENGTH_LONG).show();
+                }
+            });
+        }
+        @JavascriptInterface
         public void saveImage(String dataUrl) {
             if (!dataUrl.startsWith("data:image/png;base64,")) return;
             byte[] image = Base64.decode(dataUrl.substring(22), Base64.DEFAULT);

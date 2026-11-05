@@ -5,6 +5,7 @@ import { GOOD_SHOT_SPEED, advanceGoodShotCombo, isCombo, comboPitch } from './co
 import { createToyPlatform } from './platform.mjs';
 import { createLeaderboard } from './leaderboard.mjs';
 import { createOnlineClient } from './online.mjs';
+import { createCompetitionClient, newMatchId } from './competition-client.mjs';
 
 const $ = (selector) => document.querySelector(selector);
 const canvas = $('#rink');
@@ -37,10 +38,18 @@ let hapticsOn = true;
 let goodShotCombo = 0;
 let matchBestCombo = 0;
 let onlineMode = false;
+let rankedMode = false;
+let modeEpoch = 0;
+let matchingEpoch = 0;
+let practiceMatchId = null;
+let lastIdentityProfile = null;
+let lastOnlineProfile = null;
 let onlineTarget = null;
 const onlineEvents = [];
 const platform = createToyPlatform();
-const rankings = createLeaderboard({ platform, onOpen() { keys.clear(); if (!onlineMode) game.pause(); } });
+let rankings;
+const competition = createCompetitionClient({ platform, onChange: updateIdentity });
+rankings = createLeaderboard({ platform, competition, onOpen: pauseForDialog, onAccount: openAccount });
 const online = createOnlineClient({ onChange: updateOnlineState, onSnapshot: applyOnlineSnapshot,
   onEvent(event, slot) {
     if (!onlineMode || slot === null) return;
@@ -167,7 +176,11 @@ function handleEvent(event) {
     haptics.play('serve');
   } else if (event.type === 'finish') {
     goodShotCombo = 0;
-    if (!onlineMode) { saveRecord(event.winner); rankings.setResult(selectedLevel, matchBestCombo); }
+    if (!onlineMode) {
+      saveRecord(event.winner); rankings.setResult(selectedLevel, matchBestCombo);
+      competition.recordPractice({ matchId: practiceMatchId || newMatchId(), difficulty: selectedLevel,
+        won: event.winner === 'player', for: game.score.player, against: game.score.computer });
+    }
     playFinishSound(event.winner === 'player');
     haptics.play(event.winner === 'player' ? 'win' : 'lose');
     setTimeout(() => { renderOverlay(); makeResultCard(event.winner); }, 80);
@@ -213,9 +226,19 @@ function setOverlay(markup) {
 
 function renderOverlay() {
   const phase = game.phase;
+  if (rankedMode && (online.state.phase === 'reconnecting' || (online.state.phase === 'connecting' && online.state.room))) {
+    overlay.classList.remove('hidden');
+    setOverlay('<span class="ticket-kicker">BACK TO THE TABLE</span><h2>正在重新连接。</h2><p>球桌已暂停。20 秒内重连可继续，超时将按断线结算。</p><button class="text-button" data-action="solo">退出排位，返回单人</button>');
+    return;
+  }
   if (onlineMode && (!online.state.room?.started && phase !== 'finished')) {
     overlay.classList.remove('hidden');
     const state = online.state;
+    if (rankedMode) {
+      const waiting = state.phase === 'queue' || state.phase === 'connecting' || matchingEpoch || state.room;
+      setOverlay(`<span class="ticket-kicker">FIND YOUR NEXT RIVAL</span><h2>${waiting ? (state.room ? '找到球友，准备开拍。' : '寻找下一位对手。') : '来一场，认真过招。'}</h2><p>优先匹配积分接近的真人，等待后逐步扩大范围。${competition.state.profile ? `当前 ${competition.state.profile.elo} Elo。` : '先关联 B站云档，跨设备保留战绩。'}</p><p>开赛后主动退出判负；断线有 20 秒重连，后台暂停最多 60 秒。</p><button class="primary-button" data-action="${waiting ? 'cancel-queue' : 'ranked'}">${waiting ? '取消匹配，回到单人' : '开始匹配 ↗'}</button><button class="text-button" data-action="ranks">查看天梯 ↗</button>`);
+      return;
+    }
     if (!state.room) {
       setOverlay(`<span class="ticket-kicker">A TABLE FOR TWO</span><h2>${state.phase === 'connecting' ? '连接球桌…' : '等一位球友。'}</h2><p>创建房间，或输入朋友发来的六位房间码。</p><button class="primary-button" data-action="online">打开好友对战 ↗</button><button class="text-button" data-action="solo">回到单人练习</button>`);
     } else {
@@ -238,7 +261,17 @@ function renderOverlay() {
   } else if (phase === 'goal') {
     setOverlay(`<span class="ticket-kicker">${game.lastScorer === 'player' ? 'POINT FOR YOU' : 'POINT FOR OPPONENT'}</span><h2>${game.lastScorer === 'player' ? '漂亮！' : '下一球。'}</h2><p>比分 ${game.score.player} : ${game.score.computer} · ${game.serveTo === 'player' ? '你发球' : '对方发球'}</p>`);
   } else if (phase === 'finished') {
-    const won = game.lastScorer === 'player';
+    const won = localWinner() === 'player';
+    if (rankedMode) {
+      const state = online.state, room = state.room;
+      const rating = state.ratedResult;
+      const pending = room?.settling || room?.settlementError || !rating;
+      const detail = room?.voidPending ? '正在取消这场尚未完成的对局，不计分。'
+        : room?.settlementError ? '战绩正在重试保存，确认后再开始下一局。'
+          : rating ? `本局 ${rating.delta >= 0 ? '+' : ''}${rating.delta} Elo · 当前 ${rating.profile.elo} Elo${room?.finishReason !== 'score' ? ' · 离场结算' : ''}` : '正在确认双方战绩…';
+      setOverlay(`<span class="ticket-kicker">RANKED RESULT · ${game.score.player} : ${game.score.computer}</span><h2>${room?.voidPending ? '球桌正在收拾。' : won ? '这一局，你拿下了。' : '下一局，再接招。'}</h2><p>${detail}</p><button class="primary-button" data-action="ranked" ${pending ? 'disabled' : ''}>继续匹配 ↗</button>${room?.settlementError ? '<button class="text-button" data-action="retry-rating">重试保存战绩</button>' : ''}<button class="text-button" data-action="ranks">查看天梯 ↗</button><button class="text-button" data-action="share">保存战绩图 ↓</button>`);
+      return;
+    }
     const ready = onlineMode && online.state.room?.players.find(player => player.slot === online.state.slot)?.ready;
     setOverlay(`<span class="ticket-kicker">FINAL SCORE · ${game.score.player} : ${game.score.computer}</span><h2>${won ? '这局，你拿下了。' : '差一点，下一局。'}</h2><p>本局最高连击 ×${matchBestCombo} · ${onlineMode ? '好友对战' : levelNames[selectedLevel] + '难度'}</p><button class="primary-button" data-action="${onlineMode ? 'ready' : 'restart'}" ${ready ? 'disabled' : ''}>${ready ? '等对方准备…' : '再来一局 ↗'}</button>${onlineMode ? '' : '<button class="text-button" data-action="ranks">提交成绩 / 查看榜单 ↗</button>'}<button class="text-button" data-action="share">保存战绩图 ↓</button>`);
   }
@@ -247,6 +280,12 @@ function renderOverlay() {
 function updateScoreboard() {
   $('#player-score').textContent = game.score.player;
   $('#computer-score').textContent = game.score.computer;
+  const modeLabel = rankedMode ? '02 / 排位对战' : onlineMode ? '02 / 好友对战' : '01 / 单人对战';
+  const heading = $('.arena-topline > span:first-child');
+  if (heading.textContent !== modeLabel) heading.textContent = modeLabel;
+  $('#match-label').textContent = rankedMode ? `先得 5 分 · ${competition.state.profile?.elo ?? 1000} Elo`
+    : onlineMode ? '先得 5 分 · 好友房间' : `先得 5 分 · ${levelNames[selectedLevel]}难度`;
+  $('#restart').setAttribute('aria-label', rankedMode ? '退出本局并重新匹配，已开始的排位按退出判负' : '重新开始');
   const active = game.phase === 'playing';
   $('#pause').disabled = onlineMode || ['ready', 'finished'].includes(game.phase);
   $('#pause').textContent = game.phase === 'paused' ? '▶' : 'Ⅱ';
@@ -254,7 +293,10 @@ function updateScoreboard() {
   const status = {
     ready: '球桌就绪，等你开拍', countdown: '准备接球', playing: '比赛进行中', paused: '比赛已暂停', goal: '进球！下一球马上开始', finished: '比赛结束',
   }[game.phase];
-  $('#status-text').textContent = onlineMode ? (online.state.error || (!online.state.room?.started && game.phase !== 'finished' ? '等待球友和双方准备' : `房间 ${online.state.room?.code || ''} · ${status}`)) : status;
+  $('#status-text').textContent = onlineMode ? (online.state.error || (rankedMode && online.state.phase === 'queue' ? '正在按 Elo 匹配，等待真人对手'
+    : rankedMode && online.state.room?.settling ? '正在保存排位战绩'
+      : !online.state.room?.started && game.phase !== 'finished' ? (rankedMode ? '排位球桌就绪，等待开始匹配' : '等待球友和双方准备')
+        : `${rankedMode ? '排位' : '房间'} ${online.state.room?.code || ''} · ${status}`)) : status;
   const rallyText = active ? `${game.rally} 拍 · ${levelNames[selectedLevel]}模式` : `本局最长 ${game.stats.longestRally} 拍`;
   $('#rally-label').textContent = rallyText;
 }
@@ -262,6 +304,7 @@ function updateScoreboard() {
 function startGame() {
   if (onlineMode) return;
   setupAudio();
+  practiceMatchId = newMatchId();
   goodShotCombo = 0;
   matchBestCombo = 0;
   rankings.clearResult();
@@ -301,7 +344,15 @@ function togglePause() {
 }
 
 function updateOnlineState(state) {
+  if (state.accountProfile !== lastOnlineProfile) {
+    lastOnlineProfile = state.accountProfile;
+    if (state.accountProfile) competition.updateProfile(state.accountProfile);
+  }
   if (!onlineMode) return;
+  if (rankedMode && state.room?.phase === 'finished') game.phase = 'finished';
+  const opponent = state.room?.players.find(player => player.slot !== state.slot);
+  if (rankedMode && opponent?.alias) $('.computer-team div').firstChild.textContent = opponent.alias;
+  if (rankedMode && state.phase !== 'room' && state.room) game.phase = 'paused';
   $('#online-status').textContent = state.error || (state.room ? `房间 ${state.room.code} · ${state.room.players.length}/2 人` : state.phase === 'connecting' ? '正在连接球桌…' : online.configured ? '创建一张球桌，或加入朋友的房间。' : '好友对战服务还未上线，你可以先玩单人模式。');
   $('#create-room').disabled = !online.configured || state.phase === 'connecting' || Boolean(state.room);
   $('#join-room button').disabled = $('#create-room').disabled;
@@ -341,23 +392,53 @@ function applyOnlineSnapshot(snapshot, slot) {
   renderOverlay(); updateScoreboard();
 }
 
-function openOnline() {
+function setOnlineView(ranked) {
   keys.clear();
-  if (!onlineMode) {
-    game.pause(); onlineMode = true; restartToReady();
+  if (!onlineMode || rankedMode !== ranked) {
+    game.pause(); onlineMode = true; rankedMode = ranked; restartToReady();
     $('#solo-button').setAttribute('aria-pressed', 'false');
-    $('#online-button').setAttribute('aria-pressed', 'true');
-    $('.computer-team small').textContent = 'FRIEND';
+    $('#online-button').setAttribute('aria-pressed', String(!ranked));
+    $('#ranked-button').setAttribute('aria-pressed', String(ranked));
+    $('.computer-team small').textContent = ranked ? 'RIVAL' : 'FRIEND';
     $('.computer-team div').firstChild.textContent = '球友';
     document.querySelectorAll('[data-level]').forEach(button => { button.disabled = true; });
   }
+}
+
+function openOnline() {
+  modeEpoch += 1; matchingEpoch = 0;
+  if (rankedMode) online.leave();
+  setOnlineView(false);
   updateOnlineState(online.state);
   if (!$('#online-dialog').open) $('#online-dialog').showModal();
 }
 
+async function beginRanked() {
+  if (rankedMode && (matchingEpoch || online.state.phase === 'queue' || online.state.room?.started)) return;
+  const epoch = ++modeEpoch; matchingEpoch = epoch;
+  online.leave(); setOnlineView(true); restartToReady();
+  stage.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if ($('#online-dialog').open) $('#online-dialog').close();
+  setupAudio(); renderOverlay();
+  try {
+    const token = await competition.credential();
+    if (epoch !== modeEpoch || !rankedMode) return;
+    await online.queue(token);
+  } catch (error) {
+    if (epoch !== modeEpoch) return;
+    if (error.code !== 'cancelled') showToast(error.message);
+    if (!competition.state.profile) openAccount();
+  } finally {
+    if (matchingEpoch === epoch) matchingEpoch = 0;
+    renderOverlay(); updateScoreboard();
+  }
+}
+
 function returnSolo() {
-  onlineMode = false; online.leave(); onlineTarget = null; onlineEvents.length = 0;
+  modeEpoch += 1; matchingEpoch = 0;
+  onlineMode = false; rankedMode = false; online.leave(); onlineTarget = null; onlineEvents.length = 0;
   $('#solo-button').setAttribute('aria-pressed', 'true'); $('#online-button').setAttribute('aria-pressed', 'false');
+  $('#ranked-button').setAttribute('aria-pressed', 'false');
   $('.computer-team small').textContent = 'COMPUTER'; $('.computer-team div').firstChild.textContent = '电脑';
   document.querySelectorAll('[data-level]').forEach(button => { button.disabled = false; });
   if ($('#online-dialog').open) $('#online-dialog').close();
@@ -367,7 +448,44 @@ function returnSolo() {
 async function roomAction(action) {
   setupAudio();
   try { await action(); }
-  catch (error) { $('#online-status').textContent = error.message || '暂时无法连接，请稍后再试。'; }
+  catch (error) { if (error.code !== 'cancelled') $('#online-status').textContent = error.message || '暂时无法连接，请稍后再试。'; }
+}
+
+function pauseForDialog() {
+  keys.clear();
+  if (onlineMode) pauseOnline(); else game.pause();
+}
+
+function pauseOnline() {
+  if (rankedMode && matchingEpoch && !online.state.room) { modeEpoch += 1; matchingEpoch = 0; }
+  online.setActive(false);
+}
+
+function openAccount() {
+  pauseForDialog(); updateIdentity(competition.state);
+  if (!$('#account-dialog').open) $('#account-dialog').showModal();
+}
+
+function updateIdentity(state) {
+  const profile = state.profile;
+  if (profile !== lastIdentityProfile) { lastIdentityProfile = profile; rankings?.invalidate(); }
+  $('#rank-account').textContent = profile ? `${profile.alias} · ${profile.elo} Elo` : '关联云档，跨设备留住战绩。';
+  $('#account-button').textContent = profile ? '云档 / 关联设备 ↗' : '关联 B站云档 ↗';
+  $('#account-profile').textContent = profile ? `${profile.alias} · ${profile.elo} Elo` : '';
+  $('#account-status').textContent = state.error || (state.phase === 'loading' ? '正在连接云档…' : state.phase === 'awaiting' ? '等待你在 B站 Toy 批准这台设备。'
+    : profile ? '云档已关联，战绩会跟随这个赛号。' : competition.isToy() ? '登录 B站后点下面的按钮，创建或读回你的游戏云档。' : '用 B站 Toy 批准一次授权码，将这台设备关联到你的游戏云档。');
+  $('#connect-account').hidden = Boolean(profile && competition.isToy());
+  $('#connect-account').disabled = ['loading', 'awaiting'].includes(state.phase);
+  $('#connect-account').textContent = competition.isToy() ? '关联 B站云档 ↗' : profile ? '关联另一个云档 ↗' : '用 B站云档登录 ↗';
+  $('#device-link').hidden = !state.pair;
+  $('#device-code').textContent = state.pair?.code || '';
+  $('#open-toy-auth').href = `https://www.bilibili.com/toy/yi-pai-ji-he-air-hockey/index.html${state.pair ? `?link=${state.pair.code}` : ''}`;
+  $('#approve-link').hidden = !competition.isToy() || !profile;
+}
+
+function localWinner() {
+  const winner = rankedMode && online.state.room?.resultWinner;
+  return winner === 0 || winner === 1 ? (winner === online.state.slot ? 'player' : 'computer') : game.lastScorer;
 }
 
 async function copyRoom() {
@@ -418,12 +536,13 @@ window.airHockeyNativeFullscreen = (active) => {
 window.airHockeyNativePause = () => {
   keys.clear();
   pointerActive = false;
-  if (onlineMode) { if (online.state.room) online.setActive(false); }
+  if (onlineMode) pauseOnline();
   else game.pause();
   haptics.cancel();
   audioContext?.suspend();
 };
 window.airHockeyNativeSaved = (saved, message) => showToast(message || (saved ? '战绩图已保存。' : '没有保存成功，请再试一次。'));
+window.airHockeyNativeAuthFailed = () => showToast('请在 B站 Toy 打开一拍即合，并输入这台设备的授权码。');
 if (window.AirHockeyNative) document.documentElement.classList.add('native-app');
 
 function setupAudio() {
@@ -670,14 +789,38 @@ function makeResultCard(winner) {
   const url = card.toDataURL('image/png'); $('#result-image').src = url; $('#download-card').href = url;
 }
 
-function openShareDialog() { if (game.phase === 'finished') { makeResultCard(game.lastScorer); $('#share-dialog').showModal(); } }
+function openShareDialog() { if (game.phase === 'finished') { makeResultCard(localWinner()); $('#share-dialog').showModal(); } }
 
 document.querySelectorAll('[data-level]').forEach((button) => button.addEventListener('click', () => { if (game.phase === 'ready') haptics.play('select'); setLevel(button.dataset.level); }));
-$('#overlay').addEventListener('click', (event) => { const action = event.target.closest('[data-action]')?.dataset.action; if (action === 'start' || action === 'restart') startGame(); if (action === 'resume') togglePause(); if (action === 'share') openShareDialog(); if (action === 'ready') { setupAudio(); online.ready(); } if (action === 'online-resume') { setupAudio(); online.setActive(true); } if (action === 'copy-room') void copyRoom(); if (action === 'online') openOnline(); if (action === 'solo') returnSolo(); if (action === 'ranks') rankings.open(selectedLevel); });
+$('#overlay').addEventListener('click', (event) => { const action = event.target.closest('[data-action]')?.dataset.action; if (action === 'start' || action === 'restart') startGame(); if (action === 'resume') togglePause(); if (action === 'share') openShareDialog(); if (action === 'ready') { setupAudio(); online.ready(); } if (action === 'online-resume') { setupAudio(); online.setActive(true); } if (action === 'copy-room') void copyRoom(); if (action === 'online') openOnline(); if (action === 'solo' || action === 'cancel-queue') returnSolo(); if (action === 'ranked') void beginRanked(); if (action === 'retry-rating') online.retrySettlement(); if (action === 'ranks') rankings.open(selectedLevel, rankedMode ? 'ranked' : 'solo'); });
 $('#pause').addEventListener('click', togglePause);
 $('#solo-button').addEventListener('click', () => { if (onlineMode) returnSolo(); });
 $('#online-button').addEventListener('click', openOnline);
-$('#leaderboard-button').addEventListener('click', () => rankings.open(selectedLevel));
+$('#ranked-button').addEventListener('click', () => void beginRanked());
+$('#leaderboard-button').addEventListener('click', () => rankings.open(selectedLevel, rankedMode ? 'ranked' : 'solo'));
+$('#connect-account').addEventListener('click', async () => {
+  try {
+    if (competition.isToy()) { await competition.ensureIdentity(); await competition.flushPractice(); }
+    else {
+      const pair = await competition.startLink();
+      if (pair && !document.hidden && $('#account-dialog').open && window.AirHockeyNative?.openToyAuthorization) window.AirHockeyNative.openToyAuthorization(pair.code);
+    }
+  }
+  catch (error) { $('#account-status').textContent = error.message; }
+});
+$('#open-toy-auth').addEventListener('click', event => {
+  if (window.AirHockeyNative?.openToyAuthorization && competition.state.pair) {
+    event.preventDefault(); window.AirHockeyNative.openToyAuthorization(competition.state.pair.code);
+  }
+});
+$('#cancel-link').addEventListener('click', () => competition.cancelLink());
+$('#account-dialog').addEventListener('close', () => competition.cancelLink());
+$('#approve-link').addEventListener('submit', async event => {
+  event.preventDefault(); const button = $('#approve-link button'); button.disabled = true;
+  try { await competition.approveLink($('#device-approval-code').value); $('#device-approval-code').value = ''; $('#account-status').textContent = '已批准，这台设备可以读回同一份战绩。'; }
+  catch (error) { $('#account-status').textContent = error.message; }
+  finally { button.disabled = false; }
+});
 $('#create-room').addEventListener('click', () => void roomAction(() => online.create()));
 $('#join-room').addEventListener('submit', event => { event.preventDefault(); void roomAction(() => online.join($('#room-code').value.trim().toUpperCase())); });
 $('#ready-room').addEventListener('click', () => { setupAudio(); online.ready(); });
@@ -685,7 +828,7 @@ $('#copy-room').addEventListener('click', () => void copyRoom());
 $('#leave-room').addEventListener('click', () => online.leave());
 $('#return-solo').addEventListener('click', returnSolo);
 $('#fullscreen').addEventListener('click', () => { haptics.play('fullscreen'); void toggleFullscreen(); });
-$('#restart').addEventListener('click', () => { if (onlineMode) { online.leave(); openOnline(); } else if (game.phase === 'finished') startGame(); else restartToReady(); });
+$('#restart').addEventListener('click', () => { if (rankedMode) { online.leave(); void beginRanked(); } else if (onlineMode) { online.leave(); openOnline(); } else if (game.phase === 'finished') startGame(); else restartToReady(); });
 $('#rules-button').addEventListener('click', () => $('#rules-dialog').showModal());
 $('#download-card').addEventListener('click', (event) => {
   if (window.AirHockeyNative?.saveImage) {
@@ -708,6 +851,11 @@ window.addEventListener('keydown', (event) => {
   keys.add(key); setupAudio();
 });
 window.addEventListener('keyup', (event) => keys.delete(event.key.toLowerCase()));
+const incomingDeviceCode = new URLSearchParams(location.search).get('link');
+if (competition.isToy() && /^[A-Fa-f0-9]{6}$/.test(incomingDeviceCode || '')) {
+  $('#device-approval-code').value = incomingDeviceCode.toUpperCase();
+  queueMicrotask(openAccount);
+}
 document.addEventListener('visibilitychange', () => { if (document.hidden) { window.airHockeyNativePause(); renderOverlay(); updateScoreboard(); } });
 window.addEventListener('resize', resizeCanvas);
 document.addEventListener('fullscreenchange', updateFullscreenButton);

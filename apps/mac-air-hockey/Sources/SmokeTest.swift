@@ -7,6 +7,8 @@ final class SmokeTest {
     let directory: URL
     var started = false
     var checks: [String: Any] = [:]
+    var opponentBaseline = 0
+    var wroteDeviceCode = false
     init(app: AppDelegate, directory: String) {
         self.app = app; self.directory = URL(fileURLWithPath: directory)
         try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
@@ -91,6 +93,7 @@ final class SmokeTest {
                     // Remove exactly the PNG this diagnostic just created.
                     try? FileManager.default.removeItem(at: url)
                     if CommandLine.arguments.contains("--online-smoke") { self.startOnlineCheck() }
+                    else if CommandLine.arguments.contains("--competition-smoke") { self.startCompetitionCheck() }
                     else { self.finish() }
                 }
             }
@@ -135,7 +138,9 @@ final class SmokeTest {
             if state["peerPlaying"] as? Bool == true && (state["status"] as? String)?.contains("比赛进行中") == true {
                 self.checks["online"] = text
                 self.snapshot("mac-online") {
-                    self.evaluate("window.__onlineSmoke.peer.close();document.querySelector('#solo-button').click();true") { _ in self.finish() }
+                    self.evaluate("window.__onlineSmoke.peer.close();document.querySelector('#solo-button').click();true") { _ in
+                        if CommandLine.arguments.contains("--competition-smoke") { self.startCompetitionCheck() } else { self.finish() }
+                    }
                 }
             } else if attempt >= 25 || state["error"] as? String != nil {
                 self.checks["online"] = text
@@ -143,12 +148,64 @@ final class SmokeTest {
             } else { self.later(1) { self.pollOnline(attempt + 1) } }
         }
     }
+    func startCompetitionCheck() {
+        opponentBaseline = (app.hapticCounts["opponent-hit"] ?? 0) + (app.hapticCounts["opponent-heavy"] ?? 0)
+        evaluate("document.querySelector('#leaderboard-button').click();document.querySelector('#account-button').click();document.querySelector('#connect-account').click();true") { _ in
+            self.later(1) { self.pollCompetitionLink(0) }
+        }
+    }
+    func pollCompetitionLink(_ attempt: Int) {
+        evaluate("JSON.stringify({code:document.querySelector('#device-code').textContent,bound:document.querySelector('#account-status').textContent.includes('云档已关联'),bridge:typeof window.AirHockeyNative.openToyAuthorization==='function',errors:window.__airHockeyErrors})") { value in
+            let text = value as? String ?? "{}"
+            let state = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+            if !self.wroteDeviceCode, let code = state["code"] as? String, code.count == 6 {
+                self.wroteDeviceCode = true
+                let payload = try? JSONSerialization.data(withJSONObject: ["code": code], options: [.sortedKeys])
+                try? payload?.write(to: self.directory.appendingPathComponent("device-link.json"))
+            }
+            if state["bound"] as? Bool == true {
+                self.checks["competitionLink"] = text
+                self.app.window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+                self.later(1) {
+                    self.evaluate("document.querySelector('#account-dialog').close();document.querySelector('#leaderboard-dialog').close();document.querySelector('#ranked-button').click();true") { _ in
+                        self.pollCompetitionMatch(0)
+                    }
+                }
+            } else if attempt >= 100 { self.failed("Native device authorization did not complete") }
+            else { self.later(1) { self.pollCompetitionLink(attempt + 1) } }
+        }
+    }
+    func pollCompetitionMatch(_ attempt: Int) {
+        evaluate("document.querySelector('[data-action=online-resume]:not(:disabled)')?.click();JSON.stringify({status:document.querySelector('#status-text').textContent,ranked:document.querySelector('#ranked-button').getAttribute('aria-pressed'),profile:document.querySelector('#account-profile').textContent,visibility:document.visibilityState,errors:window.__airHockeyErrors})") { value in
+            let text = value as? String ?? "{}"
+            let state = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+            if (state["status"] as? String)?.contains("正在按 Elo 匹配") == true {
+                try? Data("{}".utf8).write(to: self.directory.appendingPathComponent("ranked-queued.json"))
+            }
+            let calls = (self.app.hapticCounts["opponent-hit"] ?? 0) + (self.app.hapticCounts["opponent-heavy"] ?? 0) - self.opponentBaseline
+            if (state["status"] as? String)?.contains("比赛进行中") == true && calls > 0 {
+                self.checks["competitionMatch"] = text
+                self.checks["networkOpponentHapticCalls"] = calls
+                self.snapshot("mac-ranked-haptics") {
+                    self.evaluate("document.querySelector('#solo-button').click();true") { _ in self.finish() }
+                }
+            } else if attempt >= 75 { self.failed("Native ranked match or opponent haptic did not arrive: \(text)") }
+            else { self.later(1) { self.pollCompetitionMatch(attempt + 1) } }
+        }
+    }
     func finish() {
+        checks["nativeHapticCounts"] = app.hapticCounts
+        checks["nativeActiveAtFinish"] = NSApp.isActive
         func object(_ name: String) -> [String: Any] {
             guard let text = checks[name] as? String, let data = text.data(using: .utf8) else { return [:] }
             return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         }
         let initial = object("initial"), full = object("fullscreen"), exited = object("exited"), promo = object("promo"), film = object("film")
+        let competitionLink = object("competitionLink"), competitionMatch = object("competitionMatch")
+        let competitionPassed = !CommandLine.arguments.contains("--competition-smoke") || (
+            competitionLink["bridge"] as? Bool == true && competitionMatch["ranked"] as? String == "true"
+            && (checks["networkOpponentHapticCalls"] as? Int ?? 0) > 0
+            && [competitionLink, competitionMatch].allSatisfy { ($0["errors"] as? [String])?.isEmpty == true })
         let scales = full["scales"] as? [Double] ?? [0, 1]
         let passed = checks["failure"] == nil && initial["start"] as? Bool == true && initial["pixels"] as? Int == 255
             && full["immersive"] as? Bool == true && checks["nativeWindowFullscreen"] as? Bool == true
@@ -157,6 +214,7 @@ final class SmokeTest {
             && (film["ready"] as? Int ?? 0) >= 2 && (film["time"] as? Double ?? 0) > 0
             && (checks["savedImage"] as? Int ?? 0) > 0
             && checks["savedToDownloads"] as? Bool == true
+            && competitionPassed
             && [initial, full, exited, promo, film].allSatisfy { ($0["errors"] as? [String])?.isEmpty == true }
         checks["passed"] = passed
         if let data = try? JSONSerialization.data(withJSONObject: checks, options: [.prettyPrinted, .sortedKeys]) {

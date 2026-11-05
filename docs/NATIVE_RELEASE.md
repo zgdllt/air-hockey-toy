@@ -1,38 +1,14 @@
-# Air Hockey v0.3.0
-
-本次新增顶部连击反馈、单局最高好球 combo 排行榜及公网好友对战。网页、Android 与 Mac 使用同一份 26 项运行资源；单机可离线运行，好友场需要联网。
-
-- 连击榜仅在正式 B站 Toy 账号上下文可用，按热身 / 标准 / 挑战分榜；玩家在单机结算后主动提交。网页与原生好友场均不提交到单机榜。
-- 好友对战：创建六位房间码、另一端加入、双方准备、先得五分、再来一局。后台共同暂停，返回后手动继续。房间为单实例内存状态，服务重启后需重新建房；不提供账户排位或原局断线续传。
-- Mac：macOS 13+，Apple Silicon / Intel 通用 DMG，内置图标、音效、互动宣传片和 30 秒 MP4。实际 Apple Silicon WKWebView、全屏等比缩放、PNG 保存、视频播放和公网房间开赛已验证；Intel 硬件未实测。使用 ad-hoc 签名，未做 Developer ID 签名 / 公证，首次打开可能需在系统“隐私与安全性”中确认。
-- Android：API 26+，VIBRATE 与 INTERNET 权限，保留原有签名证书。APK 签名及全部运行资源校验通过；此版本尚未完成小米实机联机复测。
-- 两端共享 20 类触感事件；桥接调用测试不代表物理触感强度一致。独立的 Mac 触感对照工具源码保存在 `apps/mac-air-hockey/Diagnostics/`。
-
-验证包含服务端房间状态测试、客户端映射 / 取消连接、combo 与触感回归；两个实际 Toy iframe 和公网 WSS 双连接已开局，后者实际击球和进球，并核对比分一致。没有向真实榜单提交测试分数；真实提交待更新后的 Toy 页面由登录玩家验证。
-
-源码只同步明确白名单，无设备 SDK jar、keystore、密码、构建目录或本机日志。`SOURCE-MANIFEST.json` 覆盖公开源文件；`ASSET-MANIFEST.json` 覆盖 26 项共享运行资源。安装包 SHA-256 随 Release 提供。
-
-可运行的源码检查：
-
-```sh
-node apps/tests/combo.test.mjs
-node apps/tests/online.test.mjs
-node apps/tests/haptics.test.mjs
-npm --prefix online-server ci
-npm --prefix online-server test
-```
-
----
-
-以下保留 v0.2.0 的历史发行记录，验收结果仅适用于对应版本。
-
-# Air Hockey v0.2.0 原生发行记录
+# Air Hockey 原生发行记录
 
 日期：2026-11-05（本机 Asia/Shanghai）。
-状态：v0.2.0 已完成本机验收。网页与安装包公开入口：
+当前状态：v0.3.0 网页、APK 与 DMG 已公开发布并核对远端文件。Mac 构建版运行验证通过并已更新本机安装，安装后的前台复测已通过，Android 实机复测按用户要求暂缓。下文 v0.2.0 与 v0.2.1 记录保留为对应版本历史。
+
+v0.4.0 / code 5 的云档关联、分榜与排位候选已构建并安装；27 项运行资源、APK 签名及 DMG 挂载读回通过。Mac 原生排位 / 安装版复测，以及重新连接的小米实机 MiHaptic / 排位 / 全屏复测通过。Toy 最终预览验收通过、尚待用户确认提交审核；GitHub 发行状态见 [v0.4.0](https://github.com/zgdllt/air-hockey-toy/releases/tag/v0.4.0)。当前状态与证据以 [排行榜与排位记录](LADDER.md) 为准。
+
+网页与安装包公开入口：
 
 - 在线玩：<https://zgdllt.github.io/air-hockey-toy/>
-- APK / DMG：<https://github.com/zgdllt/air-hockey-toy/releases/tag/v0.2.0>
+- APK / DMG：<https://github.com/zgdllt/air-hockey-toy/releases/tag/v0.3.0>
 
 ## 交付范围
 
@@ -67,3 +43,38 @@ Mac 使用 ad-hoc 封装签名，没有 Apple Developer ID 签名或公证，互
 签名密钥留在用户私有目录，保留现有 Android 证书以支持升级。所有公开源文件使用明确 allowlist，同步到独立 GitHub Pages checkout；不把混合工作区整体提交。
 
 最终 APK 已通过 ADB 覆盖安装；设备内 base.apk 与发布候选 SHA-256 完全相同。两个安装包校验值随 GitHub Release 提供。
+
+公开网页最终验收已完成：部署任务 `41879973767` 成功，`pages-continuation.json` 为 `verified`，公开 index / game / styles / physics / sfx / haptics / film 共 7 个文件哈希匹配源码。1987×1248 桌面和 390×844 竖屏公开页面的开局、暂停、全屏等比缩放及成片元数据检查通过。原先 Actions 队列等待已经解除，网页、APK 和 DMG 三项发布均完成。
+
+## v0.2.1 发布前 Combo 优化（本地已验证）
+
+当前构建版本为 0.2.1 / code 3。增加顶部 combo 横幅、星星动效、随连击升高的实际碰撞音高及第 20 种共享触感事件。实现与 Toy 预览细节见 [Toy 交付记录](https://www.bilibili.com/toy/yi-pai-ji-he-air-hockey/index.html)。本次未把 v0.2.1 发布到 GitHub Release，已有 v0.2.0 发布记录仍为上文所述版本。
+
+两端重建并验证 22 项源码 / Mac 包 / APK 运行资源的 SHA-256 一致；补齐互动宣传片依赖与配音 WAV。Mac 通用二进制与封装签名通过，原生 smoke 检查游戏启动、全屏等比缩放与退出、全部触感接口、互动宣传片、30 秒 MP4 播放和战绩 PNG 写入，`passed=true`。音频回归另行实际渲染了含配音的 39 秒互动宣传片音轨，未重写现有 MP4。
+
+本机 `/Applications/AirHockey.app` 已覆盖为最终候选，包内 22 项资源逐一核对；连接的小米 23117RK66C 已覆盖安装并按普通方式启动，设备 `base.apk` 哈希与最终候选相同。主观音色和新增 combo 物理触感仍待用户试玩，不以桥接日志代替主观验收。独立只读代码审查、计数单测、20 类触感桥接单测和浏览器完整事件序列均通过。
+
+本次证据在 `.runtime/air-hockey-combo-0.2.1/`，包括 `browser-check.json`、`remote-check.json`、`mac-smoke/mac-smoke.json`、`android-install.json`、`toy-assets.json` 和四次击球试听 `combo-impact-1-2-3-4.wav`。
+
+## v0.3.0 排行榜与公网好友对战（GitHub 已发布）
+
+版本为 0.3.0 / code 4。单机离线可玩，好友对战连接已部署的 CloudBase WSS 服务；排行榜依赖正式 B站 Toy 的账号上下文，原生 App 与普通站点会展示入口说明。玩法、部署配置与 Toy 预览状态见 [Toy 交付记录](https://www.bilibili.com/toy/yi-pai-ji-he-air-hockey/index.html)。Android 新增 INTERNET 权限以连接 WSS；VIBRATE 继续用于触感。
+
+Mac / APK 的 26 项运行资源 SHA-256 相同，Toy 包在 `.mjs` → `.js` 转换后逐项匹配。最终打包后另有并行工作将宣传片 `promo/rally.mjs` 的 `makeBlueBot` 改为导出函数；该后续源码改动未混入本次冻结候选，未回退。其余源码与候选匹配，详情见 `mac-install.json` 的 `sourceChangesSinceFreeze`。
+
+- Mac：通用 arm64 / x86_64，封装签名验证通过。`mac-online-final/mac-smoke.json` 为 passed=true，实际 WKWebView 创建公网房间并与第二个独立连接进入比赛；原生全屏与退出、X/Y 等比缩放、互动宣传片、MP4 时间前进、战绩 PNG 实际写入通过。此证据来自构建目录 App，不表示两位真人或物理触感已验收。
+- DMG：以只读方式挂载，核对版本、通用架构、封装签名、图标、可执行文件与 26 项资源，均与已验证构建一致，已卸载磁盘。`dmg-verify.json` 为 passed=true。
+- 本机 `/Applications/AirHockey.app` 已覆盖为 0.3.0 / code 4；签名、二进制、图标与 26 项资源逐一核对通过。保留 `/Applications/触感对照.app`。安装后的复测能进入公网比赛、播放 MP4、写出 PNG，但 Mac 系统锁屏使首次绘制与全屏断言失败，失败结果保留在 `mac-installed-final/` 和 `mac-installed-launchservices/`，解锁后已在 `mac-installed-unlocked/` 复测通过，未覆盖此前失败记录。
+- Android：签名 APK 已构建，运行资源与 Mac 一致。ADB 未连接，用户明确选择“先验证网页和 Mac”，因此本次未声称已覆盖安装或完成小米实机联机、触控、触感验收。
+- 20 类触感配置与桥接回归通过；没有用自动调用结果代替主观触感强度验收。当前 Mac 仍为 ad-hoc 签名、未公证，首次下载限制与前述相同。
+
+产物与校验值：
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `apps/mac-air-hockey/build/air-hockey-macos-universal.dmg` | 22,786,869 B | `7046f598f73cfb60cbe0b044d94ecea802008252c1b960a5301a0765fb917dee` |
+| `apps/android-air-hockey/build/air-hockey-android.apk` | 22,514,041 B | `6abc490f970cf2f8201c0f49692a67f01da04a1ed256d8e4e3778eb770c4fb3b` |
+
+证据保存在 `.runtime/air-hockey-social-0.3.0/`，包括 `artifact-hashes.json`、`mac-install.json`、`dmg-verify.json`。本机 App 已按普通方式启动；解锁后的安装版复测 `mac-installed-unlocked/mac-smoke.json` 为 passed=true，原生全屏 / 退出、等比缩放、视频、PNG 保存及公网房间开赛通过；此前锁屏失败证据仍保留。本次 Toy 更新审核尚未提交，等待最终预览的明确确认。
+
+GitHub v0.3.0 已正式发布：main 与 tag 均为 `cee686bc76b4822b3db7c3cfe344bbd6f5c07f39`；Pages 工作流 `42013961996` 为 success。公开网页 26 项运行资源逐项哈希一致，桌面与 390×844 竖屏单机、全屏等比缩放、两个公开客户端的公网房间对局与离开通过，无脚本错误。Release 的 DMG、APK 与 SHA256SUMS 已重新下载，校验值均与上述候选一致；结果见 `github-publication.json`、`github-pages-hashes.json`、`github-browser-test.json`。公开源码经过独立白名单 / 私密文件审查，61 个源文件加一份 SOURCE-MANIFEST，未同步本机密钥、设备 SDK jar、构建目录或其他项目。

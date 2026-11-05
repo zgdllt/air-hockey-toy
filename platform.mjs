@@ -32,5 +32,5 @@ export function createToyPlatform(host = window) {
       throw error;
     }
   }
-  return { ready, call };
+  return { ready, call, isToy: () => inToy() || Boolean(host.toy) };
 }

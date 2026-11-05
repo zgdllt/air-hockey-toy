@@ -1,3 +1,8 @@
 node_modules
 npm-debug.log
 .DS_Store
+*.test.mjs
+cloudbaserc.json
+.env*
+*.keystore
+*.jks

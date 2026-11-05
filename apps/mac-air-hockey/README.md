@@ -25,6 +25,10 @@ apps/mac-air-hockey/build/AirHockey.app/Contents/MacOS/AirHockey --smoke-test /t
 
 `0.3.0` 的好友对战通过公网 WSS 工作，单机继续离线运行；排行榜仅在 B站 Toy 账号上下文中可用。额外加 `--online-smoke` 时，在原生 WKWebView 内创建房间并连接独立第二位对手，确认双方进入比赛后退出。该项会真实访问当前配置的联机服务、创建临时房间；不写入排行榜。
 
+`0.4.0` 增加「关联 B站云档」：App 生成一次性设备码并打开固定的官方 Toy 页面，玩家在浏览器登录 B站、读取私有云档并主动批准，再回 App 排位。App 保留本地游戏凭证，不读取 B站登录令牌。排位、练习战绩和新榜可以跨设备恢复；官方 combo 榜提交仍在 Toy 页面完成。正式关联入口依赖对应 Toy 更新上线。
+
+显式 `--competition-smoke` 可在独立非持久 WK 数据仓验证设备关联、排位开局和对手击球的实际原生 performer 调用；需要外部诊断 authorizer 与对手，并且必须隔离到测试 scope。诊断 authorizer 不是实际 B站登录，调用计数也不能证明主观震动。普通启动不运行诊断，不导出凭证。
+
 ## 触感对照工具
 
 `Diagnostics/HapticProbe.swift` 是独立的原生诊断应用，不修改游戏或系统触控板设置。用触控板移动光标，在四个区域上下划过横线：
