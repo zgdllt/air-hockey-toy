@@ -13,6 +13,7 @@ assert.equal(messages.android.length, Object.keys(HAPTIC_PROFILES).length);
 assert(messages.android.some(m => m.kind === 'opponent-heavy'));
 assert(messages.android.some(m => m.kind === 'opponent-hit'));
 assert(messages.android.some(m => m.kind === 'post'));
+assert(messages.android.some(m => m.kind === 'combo'));
 assert.deepEqual(browserTimings(HAPTIC_PROFILES.win), [0,14,56,18,62,32]);
 const initial = messages.android.length;
 android.setEnabled(false); android.play('hit');

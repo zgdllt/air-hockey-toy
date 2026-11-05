@@ -4,7 +4,10 @@ import { simulateRally, sampleRally, puckPath } from './rally.mjs';
 import { deg, mix, clamp, smooth, easeInOut } from './camera3d.mjs';
 
 export const FPS = 60;
-export const DURATION = 30;
+export const DURATION = 40;
+/** Closing Toy segment (rink becomes a Toy tile) and the voice-over start inside it. */
+export const TOY_START = 30;
+export const VO_START = 30.4;
 export const SEED = 449;
 
 const POSTS = [[0, 180], [0, 380], [1000, 180], [1000, 380]];

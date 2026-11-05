@@ -5,3 +5,4 @@ apps/android-air-hockey/src/main/assets/
 *.jks
 *.idsig
 .DS_Store
+online-server/node_modules/

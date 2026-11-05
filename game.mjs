@@ -1,6 +1,10 @@
 import { AirHockey, LEVELS, RINK } from './physics.mjs';
 import { createSfx } from './sfx.mjs';
 import { createHaptics } from './haptics.mjs';
+import { GOOD_SHOT_SPEED, advanceGoodShotCombo, isCombo, comboPitch } from './combo.mjs';
+import { createToyPlatform } from './platform.mjs';
+import { createLeaderboard } from './leaderboard.mjs';
+import { createOnlineClient } from './online.mjs';
 
 const $ = (selector) => document.querySelector(selector);
 const canvas = $('#rink');
@@ -30,6 +34,23 @@ let screenShake = 0;
 let visualTime = 0;
 let portraitView = false;
 let hapticsOn = true;
+let goodShotCombo = 0;
+let matchBestCombo = 0;
+let onlineMode = false;
+let onlineTarget = null;
+const onlineEvents = [];
+const platform = createToyPlatform();
+const rankings = createLeaderboard({ platform, onOpen() { keys.clear(); if (!onlineMode) game.pause(); } });
+const online = createOnlineClient({ onChange: updateOnlineState, onSnapshot: applyOnlineSnapshot,
+  onEvent(event, slot) {
+    if (!onlineMode || slot === null) return;
+    onlineEvents.push({ ...event,
+      ...(event.side ? { side: online.localSide(event.side, slot) } : {}),
+      ...(event.winner ? { winner: online.localSide(event.winner, slot) } : {}),
+      ...(event.x !== undefined ? online.localPoint(event, slot) : {}),
+    });
+  },
+});
 const hapticsButton = $('#haptics');
 const haptics = createHaptics();
 let nativeFullscreen = Boolean(window.AirHockeyNative?.getFullscreen?.());
@@ -60,9 +81,9 @@ function saveRecord(result) {
 }
 
 async function loadToyRecord() {
-  if (!window.toy?.getCloudStorage) return;
   try {
-    const cloud = await window.toy.getCloudStorage(['air_hockey_wins', 'air_hockey_games', 'air_hockey_best_rally', 'air_hockey_best_speed']);
+    if (!await platform.ready()) return;
+    const cloud = await platform.call('getCloudStorage', ['air_hockey_wins', 'air_hockey_games', 'air_hockey_best_rally', 'air_hockey_best_speed']);
     record.wins = Math.max(recordAtStartup.wins, Number(cloud.air_hockey_wins) || 0) + sessionWins;
     record.games = Math.max(recordAtStartup.games, Number(cloud.air_hockey_games) || 0) + sessionGames;
     record.bestRally = Math.max(record.bestRally, Number(cloud.air_hockey_best_rally) || 0);
@@ -76,9 +97,9 @@ async function loadToyRecord() {
 }
 
 async function saveToyRecord() {
-  if (!window.toy?.setCloudStorage) return;
   try {
-    await window.toy.setCloudStorage({
+    if (!await platform.ready()) return;
+    await platform.call('setCloudStorage', {
       air_hockey_wins: String(record.wins),
       air_hockey_games: String(record.games),
       air_hockey_best_rally: String(record.bestRally),
@@ -111,23 +132,27 @@ function setLevel(level) {
 
 function handleEvent(event) {
   if (event.type === 'hit') {
-    const heavy = event.speed > 720;
+    const heavy = event.speed > GOOD_SHOT_SPEED;
     const color = event.side === 'player' ? '#9ce5d9' : '#ef765c';
+    const comboCount = event.side === 'player' ? (goodShotCombo = advanceGoodShotCombo(goodShotCombo, event)) : goodShotCombo;
+    const comboHit = event.side === 'player' && heavy && isCombo(comboCount);
+    if (event.side === 'player') matchBestCombo = Math.max(matchBestCombo, comboCount);
     particles.push({ x: event.x, y: event.y, life: .38, max: .38, color, size: heavy ? 18 : 12 });
     impacts.push({ x: event.x, y: event.y, life: heavy ? .48 : .34, max: heavy ? .48 : .34, color, heavy });
     if (event.side === 'player') {
       feedbacks.push({ x: Math.max(135, Math.min(865, event.x + 68)), y: Math.max(82, Math.min(478, event.y - 48)), text: heavy ? '好球！' : '接住了', color, life: heavy ? 1.34 : 1.02, max: heavy ? 1.34 : 1.02, heavy, flip: event.x > 500 });
       screenShake = Math.max(screenShake, heavy ? .95 : .48);
-      showBanner(heavy ? '好球！' : '接住了');
+      showBanner(comboHit ? `COMBO ×${comboCount}` : (heavy ? '好球！' : '接住了'), comboHit ? 'combo' : '');
     }
-    playHitSound(event);
-    haptics.play(event.side === 'player' ? (heavy ? 'heavy' : 'hit') : (heavy ? 'opponent-heavy' : 'opponent-hit'));
+    playHitSound(event, comboHit ? comboPitch(comboCount) : 1);
+    haptics.play(comboHit ? 'combo' : (event.side === 'player' ? (heavy ? 'heavy' : 'hit') : (heavy ? 'opponent-heavy' : 'opponent-hit')));
   } else if (event.type === 'wall') {
     particles.push({ x: event.x, y: event.y, life: .18, max: .18, color: '#f2bd45', size: 7 });
     playWallSound(event);
     const nearPost = POSTS.some(([x, y]) => Math.hypot(event.x - x, event.y - y) <= RINK.puckRadius + RINK.postRadius + 1.5);
     haptics.play(nearPost ? 'post' : 'wall');
   } else if (event.type === 'goal') {
+    goodShotCombo = 0;
     showBanner(event.side === 'player' ? '漂亮，得分！' : '别急，下一球');
     $('#goal-flash').classList.remove('show');
     void $('#goal-flash').offsetWidth;
@@ -135,16 +160,19 @@ function handleEvent(event) {
     playGoalSound(event.side === 'player');
     haptics.play(event.side === 'player' ? 'goal' : 'opponent-goal');
   } else if (event.type === 'serve') {
+    goodShotCombo = 0;
     renderOverlay();
     showBanner('开拍！');
     playServeSound();
     haptics.play('serve');
   } else if (event.type === 'finish') {
-    saveRecord(event.winner);
+    goodShotCombo = 0;
+    if (!onlineMode) { saveRecord(event.winner); rankings.setResult(selectedLevel, matchBestCombo); }
     playFinishSound(event.winner === 'player');
     haptics.play(event.winner === 'player' ? 'win' : 'lose');
     setTimeout(() => { renderOverlay(); makeResultCard(event.winner); }, 80);
   } else if (event.type === 'deadball') {
+    goodShotCombo = 0;
     showBanner('球停了，重新发球');
     haptics.play('deadball');
   } else if (event.type === 'pause' || event.type === 'resume') {
@@ -157,9 +185,12 @@ function handleEvent(event) {
   updateScoreboard();
 }
 
-function showBanner(text) {
+function showBanner(text, variant = '') {
   const banner = $('#play-banner');
   banner.textContent = text;
+  banner.classList.remove('combo');
+  if (variant === 'combo') void banner.offsetWidth;
+  banner.classList.toggle('combo', variant === 'combo');
   banner.classList.add('show');
   clearTimeout(bannerTimer);
   bannerTimer = setTimeout(() => banner.classList.remove('show'), 850);
@@ -173,21 +204,43 @@ function showToast(text) {
   toastTimer = setTimeout(() => toast.classList.remove('show'), 2400);
 }
 
+let overlayMarkup = '';
+function setOverlay(markup) {
+  if (markup === overlayMarkup) return;
+  overlayMarkup = markup;
+  overlayContent.innerHTML = markup;
+}
+
 function renderOverlay() {
   const phase = game.phase;
+  if (onlineMode && (!online.state.room?.started && phase !== 'finished')) {
+    overlay.classList.remove('hidden');
+    const state = online.state;
+    if (!state.room) {
+      setOverlay(`<span class="ticket-kicker">A TABLE FOR TWO</span><h2>${state.phase === 'connecting' ? '连接球桌…' : '等一位球友。'}</h2><p>创建房间，或输入朋友发来的六位房间码。</p><button class="primary-button" data-action="online">打开好友对战 ↗</button><button class="text-button" data-action="solo">回到单人练习</button>`);
+    } else {
+      const self = state.room.players.find(player => player.slot === state.slot);
+      setOverlay(`<span class="ticket-kicker">ROOM ${state.room.code}</span><h2>${state.room.players.length < 2 ? '等朋友来接招。' : '两位，都准备好了吗？'}</h2><p>${state.room.players.length < 2 ? '把房间码发给朋友，加入后双方准备。' : '各自控制蓝方，先到五分。'}</p><button class="primary-button" data-action="ready" ${self?.ready && self.active ? 'disabled' : ''}>${self?.ready && self.active ? '等对方准备…' : '我准备好了'}</button><button class="text-button" data-action="copy-room">复制房间码</button>`);
+    }
+    return;
+  }
   overlay.classList.toggle('hidden', phase === 'playing');
   if (phase === 'ready') {
-    overlayContent.innerHTML = `<span class="ticket-kicker">A LITTLE MATCH, JUST FOR YOU</span><h2>准备好开拍了吗？</h2><p>鼠标、触屏，或者 WASD。先得 ${RINK.winningScore} 分，拿下这张桌。</p><button class="primary-button" data-action="start">开始这局 <span>↗</span></button>`;
+    setOverlay(`<span class="ticket-kicker">A LITTLE MATCH, JUST FOR YOU</span><h2>准备好开拍了吗？</h2><p>鼠标、触屏，或者 WASD。先得 ${RINK.winningScore} 分，拿下这张桌。</p><button class="primary-button" data-action="start">开始这局 <span>↗</span></button>`);
   } else if (phase === 'countdown') {
     const number = Math.max(1, Math.ceil(game.timer));
-    overlayContent.innerHTML = `<span class="countdown-number">${number}</span><span class="countdown-label">${number === 1 ? '准备接球' : '球桌即将开拍'}</span>`;
+    setOverlay(`<span class="countdown-number">${number}</span><span class="countdown-label">${number === 1 ? '准备接球' : '球桌即将开拍'}</span>`);
   } else if (phase === 'paused') {
-    overlayContent.innerHTML = `<span class="ticket-kicker">PAUSED</span><h2>先喘口气。</h2><p>球桌停在这里。准备好后继续。</p><button class="primary-button" data-action="resume">继续比赛 <span>↗</span></button>`;
+    const self = onlineMode && online.state.room?.players.find(player => player.slot === online.state.slot);
+    setOverlay(onlineMode
+      ? `<span class="ticket-kicker">PAUSED TOGETHER</span><h2>球桌等你们回来。</h2><p>一方切到后台时双方暂停，比分和房间都会保留。</p><button class="primary-button" data-action="online-resume" ${self?.active ? 'disabled' : ''}>${self?.active ? '等球友回到球桌…' : '回到球桌 ↗'}</button>`
+      : `<span class="ticket-kicker">PAUSED</span><h2>先喘口气。</h2><p>球桌停在这里。准备好后继续。</p><button class="primary-button" data-action="resume">继续比赛 <span>↗</span></button>`);
   } else if (phase === 'goal') {
-    overlayContent.innerHTML = `<span class="ticket-kicker">${game.lastScorer === 'player' ? 'POINT FOR YOU' : 'POINT FOR COMPUTER'}</span><h2>${game.lastScorer === 'player' ? '漂亮！' : '下一球。'}</h2><p>比分 ${game.score.player} : ${game.score.computer} · ${game.serveTo === 'player' ? '你发球' : '电脑发球'}</p>`;
+    setOverlay(`<span class="ticket-kicker">${game.lastScorer === 'player' ? 'POINT FOR YOU' : 'POINT FOR OPPONENT'}</span><h2>${game.lastScorer === 'player' ? '漂亮！' : '下一球。'}</h2><p>比分 ${game.score.player} : ${game.score.computer} · ${game.serveTo === 'player' ? '你发球' : '对方发球'}</p>`);
   } else if (phase === 'finished') {
     const won = game.lastScorer === 'player';
-    overlayContent.innerHTML = `<span class="ticket-kicker">FINAL SCORE · ${game.score.player} : ${game.score.computer}</span><h2>${won ? '这局，你拿下了。' : '差一点，下一局。'}</h2><p>${won ? '反应、角度和一点点运气。' : '电脑只是先到五分，桌子还在等你。'}</p><button class="primary-button" data-action="restart">再来一局 <span>↗</span></button><button class="text-button" data-action="share">保存战绩图 ↓</button>`;
+    const ready = onlineMode && online.state.room?.players.find(player => player.slot === online.state.slot)?.ready;
+    setOverlay(`<span class="ticket-kicker">FINAL SCORE · ${game.score.player} : ${game.score.computer}</span><h2>${won ? '这局，你拿下了。' : '差一点，下一局。'}</h2><p>本局最高连击 ×${matchBestCombo} · ${onlineMode ? '好友对战' : levelNames[selectedLevel] + '难度'}</p><button class="primary-button" data-action="${onlineMode ? 'ready' : 'restart'}" ${ready ? 'disabled' : ''}>${ready ? '等对方准备…' : '再来一局 ↗'}</button>${onlineMode ? '' : '<button class="text-button" data-action="ranks">提交成绩 / 查看榜单 ↗</button>'}<button class="text-button" data-action="share">保存战绩图 ↓</button>`);
   }
 }
 
@@ -195,18 +248,23 @@ function updateScoreboard() {
   $('#player-score').textContent = game.score.player;
   $('#computer-score').textContent = game.score.computer;
   const active = game.phase === 'playing';
-  $('#pause').disabled = ['ready', 'finished'].includes(game.phase);
+  $('#pause').disabled = onlineMode || ['ready', 'finished'].includes(game.phase);
   $('#pause').textContent = game.phase === 'paused' ? '▶' : 'Ⅱ';
   $('#status-dot').classList.toggle('live', active);
   const status = {
     ready: '球桌就绪，等你开拍', countdown: '准备接球', playing: '比赛进行中', paused: '比赛已暂停', goal: '进球！下一球马上开始', finished: '比赛结束',
   }[game.phase];
-  $('#status-text').textContent = status;
-  $('#rally-label').textContent = active ? `${game.rally} 拍 · ${levelNames[selectedLevel]}模式` : `本局最长 ${game.stats.longestRally} 拍`;
+  $('#status-text').textContent = onlineMode ? (online.state.error || (!online.state.room?.started && game.phase !== 'finished' ? '等待球友和双方准备' : `房间 ${online.state.room?.code || ''} · ${status}`)) : status;
+  const rallyText = active ? `${game.rally} 拍 · ${levelNames[selectedLevel]}模式` : `本局最长 ${game.stats.longestRally} 拍`;
+  $('#rally-label').textContent = rallyText;
 }
 
 function startGame() {
+  if (onlineMode) return;
   setupAudio();
+  goodShotCombo = 0;
+  matchBestCombo = 0;
+  rankings.clearResult();
   game.start(selectedLevel);
   trail.length = 0;
   particles.length = 0;
@@ -222,6 +280,9 @@ function restartToReady() {
   haptics.cancel();
   haptics.play('restart');
   game.reset();
+  goodShotCombo = 0;
+  matchBestCombo = 0;
+  rankings.clearResult();
   trail.length = 0;
   particles.length = 0;
   feedbacks.length = 0;
@@ -232,10 +293,88 @@ function restartToReady() {
 }
 
 function togglePause() {
+  if (onlineMode) return;
   if (game.phase === 'paused') { setupAudio(); game.resume(); }
   else game.pause();
   renderOverlay();
   updateScoreboard();
+}
+
+function updateOnlineState(state) {
+  if (!onlineMode) return;
+  $('#online-status').textContent = state.error || (state.room ? `房间 ${state.room.code} · ${state.room.players.length}/2 人` : state.phase === 'connecting' ? '正在连接球桌…' : online.configured ? '创建一张球桌，或加入朋友的房间。' : '好友对战服务还未上线，你可以先玩单人模式。');
+  $('#create-room').disabled = !online.configured || state.phase === 'connecting' || Boolean(state.room);
+  $('#join-room button').disabled = $('#create-room').disabled;
+  $('#room-info').hidden = !state.room;
+  $('#room-code-display').textContent = state.room?.code || '';
+  const self = state.room?.players.find(player => player.slot === state.slot);
+  $('#ready-room').disabled = Boolean((self?.ready && self.active) || state.room?.started);
+  $('#ready-room').textContent = self?.ready && self.active ? '等对方准备…' : '我准备好了';
+  if (state.room && $('#online-dialog').open) $('#online-dialog').close();
+  if (!state.room || (!state.room.started && game.phase !== 'finished')) {
+    game.phase = 'ready'; onlineTarget = null; onlineEvents.length = 0;
+  }
+  renderOverlay(); updateScoreboard();
+}
+
+function applyOnlineSnapshot(snapshot, slot) {
+  if (!onlineMode || slot === null) return;
+  const previous = game.phase;
+  game.phase = snapshot.phase; game.timer = snapshot.timer;
+  game.score = slot === 1 ? { player: snapshot.score.computer, computer: snapshot.score.player } : { ...snapshot.score };
+  game.serveTo = online.localSide(snapshot.serveTo, slot);
+  game.lastScorer = snapshot.lastScorer ? online.localSide(snapshot.lastScorer, slot) : null;
+  game.rally = snapshot.rally;
+  game.stats = { ...snapshot.stats, ...snapshot.stats.players[slot] };
+  onlineTarget = { puck: online.localPoint(snapshot.puck, slot), computer: online.localPoint(snapshot.players[1 - slot], slot) };
+  if (previous !== game.phase || game.phase !== 'playing') {
+    Object.assign(game.player, online.localPoint(snapshot.players[slot], slot));
+    Object.assign(game.puck, onlineTarget.puck); Object.assign(game.computer, onlineTarget.computer);
+  }
+  for (const name of ['puck', 'computer']) {
+    game[name].vx = onlineTarget[name].vx; game[name].vy = onlineTarget[name].vy;
+  }
+  for (const event of onlineEvents.splice(0)) {
+    if (event.type === 'start') { goodShotCombo = 0; matchBestCombo = 0; rankings.clearResult(); }
+    handleEvent(event);
+  }
+  renderOverlay(); updateScoreboard();
+}
+
+function openOnline() {
+  keys.clear();
+  if (!onlineMode) {
+    game.pause(); onlineMode = true; restartToReady();
+    $('#solo-button').setAttribute('aria-pressed', 'false');
+    $('#online-button').setAttribute('aria-pressed', 'true');
+    $('.computer-team small').textContent = 'FRIEND';
+    $('.computer-team div').firstChild.textContent = '球友';
+    document.querySelectorAll('[data-level]').forEach(button => { button.disabled = true; });
+  }
+  updateOnlineState(online.state);
+  if (!$('#online-dialog').open) $('#online-dialog').showModal();
+}
+
+function returnSolo() {
+  onlineMode = false; online.leave(); onlineTarget = null; onlineEvents.length = 0;
+  $('#solo-button').setAttribute('aria-pressed', 'true'); $('#online-button').setAttribute('aria-pressed', 'false');
+  $('.computer-team small').textContent = 'COMPUTER'; $('.computer-team div').firstChild.textContent = '电脑';
+  document.querySelectorAll('[data-level]').forEach(button => { button.disabled = false; });
+  if ($('#online-dialog').open) $('#online-dialog').close();
+  restartToReady();
+}
+
+async function roomAction(action) {
+  setupAudio();
+  try { await action(); }
+  catch (error) { $('#online-status').textContent = error.message || '暂时无法连接，请稍后再试。'; }
+}
+
+async function copyRoom() {
+  const code = online.state.room?.code;
+  if (!code) return;
+  try { await navigator.clipboard.writeText(code); showToast(`房间码 ${code} 已复制，发给朋友来接招。`); }
+  catch { showToast(`请把房间码 ${code} 发给朋友。`); }
 }
 
 function fullscreenElement() {
@@ -279,7 +418,8 @@ window.airHockeyNativeFullscreen = (active) => {
 window.airHockeyNativePause = () => {
   keys.clear();
   pointerActive = false;
-  game.pause();
+  if (onlineMode) { if (online.state.room) online.setActive(false); }
+  else game.pause();
   haptics.cancel();
   audioContext?.suspend();
 };
@@ -330,9 +470,9 @@ function playNoise({ duration = .05, frequency = 1800, q = 1.8, gain = .04, at =
   } catch { /* browsers may block audio until a gesture */ }
 }
 
-function playHitSound(event) {
+function playHitSound(event, pitch = 1) {
   if (!soundOn) return;
-  try { setupAudio(); sfx.hit({ speed: event.speed, x: event.x, side: event.side }); } catch { /* browsers may block audio until a gesture */ }
+  try { setupAudio(); sfx.hit({ speed: event.speed, x: event.x, side: event.side, pitch }); } catch { /* browsers may block audio until a gesture */ }
 }
 
 const POSTS = [[0, 180], [0, 380], [1000, 180], [1000, 380]];
@@ -434,7 +574,7 @@ function render() {
   drawGoal('left', 0, '#9ce5d9'); drawGoal('right', 1000, '#ef765c');
   for (const point of trail) { const life = Math.max(0.04, point.life); ctx.globalAlpha = life * .34; ctx.beginPath(); ctx.arc(point.x, point.y, RINK.puckRadius * life, 0, Math.PI * 2); ctx.fillStyle = '#f2bd45'; ctx.fill(); }
   ctx.globalAlpha = 1;
-  drawMallet(game.player, '#9ce5d9', '#137985', 'YOU'); drawMallet(game.computer, '#ef765c', '#a4413e', 'CPU'); drawPuck(game.puck);
+  drawMallet(game.player, '#9ce5d9', '#137985', 'YOU'); drawMallet(game.computer, '#ef765c', '#a4413e', onlineMode ? 'RIVAL' : 'CPU'); drawPuck(game.puck);
   for (const impact of impacts) drawImpact(impact);
   for (const feedback of feedbacks) drawGraffitiFeedback(feedback);
   for (const particle of particles) { const alpha = Math.max(0, particle.life / particle.max); ctx.globalAlpha = alpha; ctx.strokeStyle = particle.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(particle.x, particle.y, particle.size * (1.4 - alpha), 0, Math.PI * 2); ctx.stroke(); }
@@ -523,7 +663,7 @@ function makeResultCard(winner) {
   c.fillStyle = '#162b32'; c.font = '500 20px DM Mono, monospace'; c.fillText(`${levelNames[selectedLevel].toUpperCase()} MODE  ·  FIRST TO ${RINK.winningScore}`, 82, 232);
   c.fillStyle = '#17616b'; roundedRect(c, 78, 294, 1044, 375, 16); c.fill();
   c.strokeStyle = 'rgba(180,244,231,.5)'; c.lineWidth = 4; c.strokeRect(92, 308, 1016, 347); c.strokeStyle = 'rgba(244,243,233,.45)'; c.beginPath(); c.moveTo(600, 308); c.lineTo(600, 655); c.stroke();
-  c.fillStyle = '#f4f3e9'; c.font = '500 26px Noto Serif SC, serif'; c.fillText('你', 278, 365); c.fillText('电脑', 865, 365);
+  c.fillStyle = '#f4f3e9'; c.font = '500 26px Noto Serif SC, serif'; c.fillText('你', 278, 365); c.fillText(onlineMode ? '球友' : '电脑', 865, 365);
   c.font = '900 130px DM Mono, monospace'; c.fillStyle = '#9ce5d9'; c.fillText(String(game.score.player), 245, 505); c.fillStyle = '#ef765c'; c.fillText(String(game.score.computer), 835, 505); c.fillStyle = '#f2bd45'; c.font = '500 56px DM Mono, monospace'; c.fillText(':', 578, 505);
   c.fillStyle = '#f4f3e9'; c.font = '500 20px DM Mono, monospace'; c.fillText(`RALLY ${game.stats.longestRally}  ·  BEST SHOT ${Math.round(game.stats.fastestShot)} PX/S`, 255, 595);
   c.fillStyle = '#162b32'; c.font = '600 24px Noto Serif SC, serif'; c.fillText('一拍即合 · 来自你的浏览器战绩', 78, 760); c.fillStyle = '#6e7a78'; c.font = '500 17px DM Mono, monospace'; c.fillText('PLAY IT. FEEL IT. SHARE IT.', 78, 800);
@@ -533,10 +673,19 @@ function makeResultCard(winner) {
 function openShareDialog() { if (game.phase === 'finished') { makeResultCard(game.lastScorer); $('#share-dialog').showModal(); } }
 
 document.querySelectorAll('[data-level]').forEach((button) => button.addEventListener('click', () => { if (game.phase === 'ready') haptics.play('select'); setLevel(button.dataset.level); }));
-$('#overlay').addEventListener('click', (event) => { const action = event.target.closest('[data-action]')?.dataset.action; if (action === 'start') startGame(); if (action === 'restart') startGame(); if (action === 'resume') togglePause(); if (action === 'share') openShareDialog(); });
+$('#overlay').addEventListener('click', (event) => { const action = event.target.closest('[data-action]')?.dataset.action; if (action === 'start' || action === 'restart') startGame(); if (action === 'resume') togglePause(); if (action === 'share') openShareDialog(); if (action === 'ready') { setupAudio(); online.ready(); } if (action === 'online-resume') { setupAudio(); online.setActive(true); } if (action === 'copy-room') void copyRoom(); if (action === 'online') openOnline(); if (action === 'solo') returnSolo(); if (action === 'ranks') rankings.open(selectedLevel); });
 $('#pause').addEventListener('click', togglePause);
+$('#solo-button').addEventListener('click', () => { if (onlineMode) returnSolo(); });
+$('#online-button').addEventListener('click', openOnline);
+$('#leaderboard-button').addEventListener('click', () => rankings.open(selectedLevel));
+$('#create-room').addEventListener('click', () => void roomAction(() => online.create()));
+$('#join-room').addEventListener('submit', event => { event.preventDefault(); void roomAction(() => online.join($('#room-code').value.trim().toUpperCase())); });
+$('#ready-room').addEventListener('click', () => { setupAudio(); online.ready(); });
+$('#copy-room').addEventListener('click', () => void copyRoom());
+$('#leave-room').addEventListener('click', () => online.leave());
+$('#return-solo').addEventListener('click', returnSolo);
 $('#fullscreen').addEventListener('click', () => { haptics.play('fullscreen'); void toggleFullscreen(); });
-$('#restart').addEventListener('click', () => { if (game.phase === 'finished') startGame(); else restartToReady(); });
+$('#restart').addEventListener('click', () => { if (onlineMode) { online.leave(); openOnline(); } else if (game.phase === 'finished') startGame(); else restartToReady(); });
 $('#rules-button').addEventListener('click', () => $('#rules-dialog').showModal());
 $('#download-card').addEventListener('click', (event) => {
   if (window.AirHockeyNative?.saveImage) {
@@ -551,7 +700,13 @@ canvas.addEventListener('pointerdown', (event) => { pointerActive = true; canvas
 canvas.addEventListener('pointermove', (event) => { if (event.pointerType === 'mouse' || pointerActive) setPointerTarget(event); });
 canvas.addEventListener('pointerup', (event) => { pointerActive = false; canvas.releasePointerCapture?.(event.pointerId); });
 canvas.addEventListener('pointercancel', () => { pointerActive = false; });
-window.addEventListener('keydown', (event) => { const key = event.key.toLowerCase(); if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d',' '].includes(key)) event.preventDefault(); if (key === ' ') { togglePause(); return; } keys.add(key); setupAudio(); });
+window.addEventListener('keydown', (event) => {
+  if (document.querySelector('dialog[open]') || event.target?.closest?.('input,textarea,select,[contenteditable]')) { keys.clear(); return; }
+  const key = event.key.toLowerCase();
+  if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d',' '].includes(key)) event.preventDefault();
+  if (key === ' ') { togglePause(); return; }
+  keys.add(key); setupAudio();
+});
 window.addEventListener('keyup', (event) => keys.delete(event.key.toLowerCase()));
 document.addEventListener('visibilitychange', () => { if (document.hidden) { window.airHockeyNativePause(); renderOverlay(); updateScoreboard(); } });
 window.addEventListener('resize', resizeCanvas);
@@ -562,7 +717,16 @@ function frame(now) {
   const dt = Math.min(.05, Math.max(0, (now - lastFrame) / 1000)); lastFrame = now;
   visualTime += dt;
   screenShake = Math.max(0, screenShake - dt * 3.9);
-  updateKeyboard(dt); game.update(dt);
+  updateKeyboard(dt);
+  if (onlineMode) {
+    if (online.state.room?.started && ['playing', 'countdown'].includes(game.phase)) { game.followPlayer(dt); online.input(game.target.x, game.target.y); }
+    if (onlineTarget) {
+      const amount = 1 - Math.exp(-dt * 28);
+      for (const name of ['puck', 'computer']) {
+        for (const axis of ['x', 'y']) game[name][axis] += (onlineTarget[name][axis] - game[name][axis]) * amount;
+      }
+    }
+  } else game.update(dt);
   const puck = game.puck; trail.unshift({ x: puck.x, y: puck.y, life: 1 }); if (trail.length > 10) trail.pop(); trail.forEach((point) => { point.life -= dt * 4.2; });
   for (let index = particles.length - 1; index >= 0; index -= 1) { particles[index].life -= dt; if (particles[index].life <= 0) particles.splice(index, 1); }
   for (let index = impacts.length - 1; index >= 0; index -= 1) { impacts[index].life -= dt; if (impacts[index].life <= 0) impacts.splice(index, 1); }

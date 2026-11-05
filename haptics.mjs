@@ -21,6 +21,7 @@ export const HAPTIC_PROFILES = Object.freeze({
   select: [tap(0, 8, .28, .9)],
   toggle: [tap(0, 10, .45)],
   fullscreen: [tap(0, 10, .4, .6)],
+  combo: [tap(0, 14, .84, .9), tap(48, 20, 1, .72), tap(112, 10, .52, .9)],
 });
 
 export function browserTimings(pulses) {

@@ -90,9 +90,57 @@ final class SmokeTest {
                     try? data.write(to: self.directory.appendingPathComponent("mac-saved-image.png"))
                     // Remove exactly the PNG this diagnostic just created.
                     try? FileManager.default.removeItem(at: url)
-                    self.finish()
+                    if CommandLine.arguments.contains("--online-smoke") { self.startOnlineCheck() }
+                    else { self.finish() }
                 }
             }
+        }
+    }
+    func startOnlineCheck() {
+        evaluate("""
+        window.__onlineSmoke = {peerPlaying:false, error:null};
+        import('./online-config.mjs').then(({ONLINE_SERVER}) => {
+          document.querySelector('#online-button').click();
+          document.querySelector('#create-room').click();
+          let attempts=0;
+          const timer=setInterval(()=>{
+            const code=document.querySelector('#room-code-display').textContent;
+            if(!code){if(++attempts>150){clearInterval(timer);window.__onlineSmoke.error='No room';}return;}
+            clearInterval(timer);
+            const peer=new WebSocket(ONLINE_SERVER);window.__onlineSmoke.peer=peer;
+            peer.onopen=()=>peer.send(JSON.stringify({type:'room.join',code}));
+            peer.onerror=()=>window.__onlineSmoke.error='Peer WebSocket failed';
+            peer.onmessage=({data})=>{
+              const message=JSON.parse(data);
+              if(message.type==='room.joined'){
+                peer.send(JSON.stringify({type:'player.ready',ready:true}));
+                document.querySelector('[data-action=ready]')?.click();
+              }
+              if(message.type==='snapshot'&&message.phase==='playing')window.__onlineSmoke.peerPlaying=true;
+            };
+          },100);
+        }).catch(error=>window.__onlineSmoke.error=String(error));
+        true
+        """) { _ in self.later(1) { self.pollOnline(0) } }
+    }
+    func pollOnline(_ attempt: Int) {
+        evaluate("""
+        document.querySelector('[data-action=online-resume]:not(:disabled)')?.click();
+        JSON.stringify({peerPlaying:window.__onlineSmoke.peerPlaying,error:window.__onlineSmoke.error,
+          status:document.querySelector('#status-text').textContent,
+          room:document.querySelector('#room-code-display').textContent})
+        """) { value in
+            let text = value as? String ?? "{}"
+            let state = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+            if state["peerPlaying"] as? Bool == true && (state["status"] as? String)?.contains("比赛进行中") == true {
+                self.checks["online"] = text
+                self.snapshot("mac-online") {
+                    self.evaluate("window.__onlineSmoke.peer.close();document.querySelector('#solo-button').click();true") { _ in self.finish() }
+                }
+            } else if attempt >= 25 || state["error"] as? String != nil {
+                self.checks["online"] = text
+                self.evaluate("window.__onlineSmoke?.peer?.close();document.querySelector('#solo-button').click();true") { _ in self.failed("Native public WSS match did not start: \(text)") }
+            } else { self.later(1) { self.pollOnline(attempt + 1) } }
         }
     }
     func finish() {

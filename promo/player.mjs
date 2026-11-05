@@ -1,6 +1,7 @@
 // Browser preview + recorder hooks for the promo film.
 import { createDirector, DURATION, FPS } from './promo.mjs';
 import { renderSoundtrack, toWav } from './audio.mjs';
+import { toyUrl } from './toy.mjs';
 
 const params = new URLSearchParams(location.search);
 const canvas = document.querySelector('#film');
@@ -14,6 +15,7 @@ let playing = false, soundOn = true, startWall = 0, startT = 0, current = Number
 let audioContext = null, soundtrackPromise = null, source = null, playToken = 0;
 
 if (params.has('record')) document.body.classList.add('record');
+scrub.max = String(DURATION);
 
 function draw(t) {
   current = t;
@@ -36,7 +38,14 @@ async function play() {
   const token = ++playToken;
   playing = true; playButton.textContent = 'Ⅱ 暂停';
   if (soundOn) {
-    const buffer = await ensureSoundtrack();
+    let buffer;
+    try { buffer = await ensureSoundtrack(); }
+    catch (error) {
+      // Drop the failed render so the next play retries, and leave the UI in a consistent paused state.
+      console.error('soundtrack failed:', error); soundtrackPromise = null;
+      if (token === playToken) pause();
+      return;
+    }
     await audioContext.resume();
     if (token !== playToken || !playing) return; // paused or restarted while the soundtrack was rendering
     stopAudio();
@@ -78,7 +87,7 @@ function bytesToBase64(bytes) {
 
 // Recorder hooks (used by scripts/record.mjs through Playwright).
 window.__promo = {
-  duration: DURATION, fps: FPS,
+  duration: DURATION, fps: FPS, toyUrl: toyUrl(),
   ready: document.fonts.ready.then(() => { draw(current); return true; }),
   frame(t, type = 'image/png', quality) { director.renderAt(ctx, t); return canvas.toDataURL(type, quality); },
   async soundtrackWav() { return bytesToBase64(new Uint8Array(toWav(await renderSoundtrack(director.film)))); },

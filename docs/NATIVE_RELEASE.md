@@ -1,3 +1,31 @@
+# Air Hockey v0.3.0
+
+本次新增顶部连击反馈、单局最高好球 combo 排行榜及公网好友对战。网页、Android 与 Mac 使用同一份 26 项运行资源；单机可离线运行，好友场需要联网。
+
+- 连击榜仅在正式 B站 Toy 账号上下文可用，按热身 / 标准 / 挑战分榜；玩家在单机结算后主动提交。网页与原生好友场均不提交到单机榜。
+- 好友对战：创建六位房间码、另一端加入、双方准备、先得五分、再来一局。后台共同暂停，返回后手动继续。房间为单实例内存状态，服务重启后需重新建房；不提供账户排位或原局断线续传。
+- Mac：macOS 13+，Apple Silicon / Intel 通用 DMG，内置图标、音效、互动宣传片和 30 秒 MP4。实际 Apple Silicon WKWebView、全屏等比缩放、PNG 保存、视频播放和公网房间开赛已验证；Intel 硬件未实测。使用 ad-hoc 签名，未做 Developer ID 签名 / 公证，首次打开可能需在系统“隐私与安全性”中确认。
+- Android：API 26+，VIBRATE 与 INTERNET 权限，保留原有签名证书。APK 签名及全部运行资源校验通过；此版本尚未完成小米实机联机复测。
+- 两端共享 20 类触感事件；桥接调用测试不代表物理触感强度一致。独立的 Mac 触感对照工具源码保存在 `apps/mac-air-hockey/Diagnostics/`。
+
+验证包含服务端房间状态测试、客户端映射 / 取消连接、combo 与触感回归；两个实际 Toy iframe 和公网 WSS 双连接已开局，后者实际击球和进球，并核对比分一致。没有向真实榜单提交测试分数；真实提交待更新后的 Toy 页面由登录玩家验证。
+
+源码只同步明确白名单，无设备 SDK jar、keystore、密码、构建目录或本机日志。`SOURCE-MANIFEST.json` 覆盖公开源文件；`ASSET-MANIFEST.json` 覆盖 26 项共享运行资源。安装包 SHA-256 随 Release 提供。
+
+可运行的源码检查：
+
+```sh
+node apps/tests/combo.test.mjs
+node apps/tests/online.test.mjs
+node apps/tests/haptics.test.mjs
+npm --prefix online-server ci
+npm --prefix online-server test
+```
+
+---
+
+以下保留 v0.2.0 的历史发行记录，验收结果仅适用于对应版本。
+
 # Air Hockey v0.2.0 原生发行记录
 
 日期：2026-11-05（本机 Asia/Shanghai）。

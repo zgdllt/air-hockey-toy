@@ -203,12 +203,13 @@ export function drawTimeAxis(ctx, cam, film, lift, zOf) {
   ctx.restore();
 }
 
-export function drawEndCard(ctx, t, film) {
+/** End card; `fade` (0..1) lets the Toy segment take over. */
+export function drawEndCard(ctx, t, film, fade = 1) {
   const k = (d) => easeInOut((t - d) / .6);
   ctx.save(); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
-  ctx.globalAlpha = k(26.0); ctx.font = `500 20px ${MONO}`; ctx.fillStyle = C.tealDark;
+  ctx.globalAlpha = k(26.0) * fade; ctx.font = `500 20px ${MONO}`; ctx.fillStyle = C.tealDark;
   ctx.fillText('AIR HOCKEY CLUB  ·  VOL. 01', 110, 300);
-  ctx.globalAlpha = 1; ctx.save(); ctx.beginPath(); ctx.rect(100, 300, 760 * k(26.2), 220); ctx.clip();
+  ctx.globalAlpha = fade; ctx.save(); ctx.beginPath(); ctx.rect(100, 300, 760 * k(26.2), 220); ctx.clip();
   ctx.font = `900 172px ${SERIF}`; ctx.fillStyle = C.ink; ctx.fillText('一拍即合', 102, 482); ctx.restore();
   const u = k(26.6);
   if (u > 0) {
@@ -216,20 +217,20 @@ export function drawEndCard(ctx, t, film) {
     ctx.moveTo(110, 520); ctx.quadraticCurveTo(110 + 330 * u, 488, 110 + 700 * u, 510);
     ctx.moveTo(170, 540); ctx.quadraticCurveTo(170 + 280 * u, 522, 170 + 560 * u, 535); ctx.stroke();
   }
-  ctx.globalAlpha = k(26.9); ctx.font = `700 54px ${SERIF}`; ctx.fillStyle = C.ink; ctx.fillText('来点', 110, 632);
+  ctx.globalAlpha = k(26.9) * fade; ctx.font = `700 54px ${SERIF}`; ctx.fillStyle = C.ink; ctx.fillText('来点', 110, 632);
   const w1 = ctx.measureText('来点').width; ctx.fillStyle = C.tealDark; ctx.fillText('碰撞', 110 + w1, 632);
   const w2 = ctx.measureText('碰撞').width; ctx.fillStyle = C.coral; ctx.fillText('，一拍就上头。', 110 + w1 + w2, 632);
-  ctx.globalAlpha = k(27.3); let x = 110;
+  ctx.globalAlpha = k(27.3) * fade; let x = 110;
   ctx.font = `500 21px ${MONO}`;
   for (const chip of ['鼠标 / 触屏 / WASD', '先得 5 分', '浏览器即开即玩']) {
     const w = ctx.measureText(chip).width + 34; ctx.strokeStyle = C.ink; ctx.lineWidth = 2; ctx.strokeRect(x, 680, w, 46);
     ctx.fillStyle = C.ink; ctx.fillText(chip, x + 17, 711); x += w + 14;
   }
-  ctx.globalAlpha = k(27.7);
+  ctx.globalAlpha = k(27.7) * fade;
   ctx.fillStyle = C.ink; ctx.fillRect(110, 770, 300, 78); ctx.font = `900 34px ${SERIF}`; ctx.fillStyle = C.paper; ctx.fillText('立即开拍', 140, 821);
   ctx.fillStyle = C.coral; ctx.fillText('↗', 352, 821);
   ctx.font = `600 26px ${MONO}`; ctx.fillStyle = C.tealDark; ctx.fillText('zgdllt.github.io/air-hockey-toy', 436, 820);
-  ctx.globalAlpha = k(28.0) * .8; ctx.font = `500 15px ${MONO}`; ctx.fillStyle = C.ink;
+  ctx.globalAlpha = k(28.0) * .8 * fade; ctx.font = `500 15px ${MONO}`; ctx.fillStyle = C.ink;
   ctx.fillText(`画面为游戏内置 2D 物理引擎实算回合（AI 对 AI，种子 ${film.seed}，${film.hits.length} 次击球 / ${film.bounces.length} 次反弹）；3D 与时间轴是同一组数据的可视化，慢放 / 定格 / 快放均已标注。`, 110, 1010);
   ctx.restore();
 }

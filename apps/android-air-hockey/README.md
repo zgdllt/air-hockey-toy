@@ -6,11 +6,11 @@
 
 球桌 ⛶ 调用原生 WindowInsetsController 隐藏系统栏，同时通知网页切换沉浸布局。再次点击 × 或系统返回可退出。竖屏和横屏保持球桌比例，切到后台暂停，返回手动继续。
 
-`haptics.mjs` 为 Mac / Android 共享的 19 种事件与脉冲表，覆盖双方击球与重击、侧壁、门柱、得分/失分、发球、胜负、死球、开局、暂停/继续、重开、难度与开关/全屏。
+`haptics.mjs` 为 Mac / Android 共享的 20 种事件与脉冲表，覆盖双方击球与重击、连续好球 combo、侧壁、门柱、得分/失分、发球、胜负、死球、开局、暂停/继续、重开、难度与开关/全屏。
 
 优先反射调用设备内已有的 MiHaptic `android.os.DynamicEffect` / `HapticPlayer`，再尝试 `miui.os` 命名空间；按共享表设置 transient 时间、intensity、sharpness。兼容接口不可用时使用 Android VibrationEffect 的节奏和振幅。应用不会修改用户的系统触感设置；接口调用记录与主观触感体验应分别判断。
 
-使用受限的 HTTPS 本地资源拦截加载 ES modules，关闭 WebView file/content access，APK 无 INTERNET 权限。外部链接交给系统浏览器。战绩图通过系统「创建文档」窗口保存，无需全盘存储权限。
+使用受限的 HTTPS 本地资源拦截加载 ES modules，关闭 WebView file/content access。`0.3.0` 在原 VIBRATE 权限外增加 INTERNET，用于公网 WSS 好友对战；单机仍可离线运行。外部链接交给系统浏览器。战绩图通过系统「创建文档」窗口保存，无需全盘存储权限。Toy 连击榜需要在 B站正式 Toy 页面使用，独立 App 不借用浏览器登录身份。
 
 ## 构建与安装
 

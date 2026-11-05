@@ -107,10 +107,11 @@ export function createSfx(ac, { output = ac.destination, level = 1, room = .16 }
   /** Mallet ↔ puck: hard plastic clack with weight; heavy hits snap and drop. */
   function hit(o = {}) {
     const { when, i, pitch, time, vary, pan } = common(o);
+    const clackPitch = pitch * (o.pitch ?? 1);
     const out = voiceOut(when, pan, input);
     const side = o.side === 'computer' ? .93 : 1.06;
-    const f0 = (900 + 420 * i) * side * vary * pitch;
-    burst(when, { type: 'highpass', freq: 3400 * pitch, q: .7, peak: .2 + .32 * i, dur: .007 * time, out });
+    const f0 = (900 + 420 * i) * side * vary * clackPitch;
+    burst(when, { type: 'highpass', freq: 3400 * clackPitch, q: .7, peak: .2 + .32 * i, dur: .007 * time, out });
     [[1, 1, .085], [1.51, .62, .06], [2.29, .4, .042], [3.07, .22, .03]].forEach(([ratio, amp, decay]) =>
       mode(when, f0 * ratio, (.07 + .13 * i) * amp, decay * (1 + .7 * i) * time, out));
     burst(when, { freq: f0 * 1.6, q: 5, peak: .08 + .12 * i, dur: .035 * time, out });
@@ -118,9 +119,9 @@ export function createSfx(ac, { output = ac.destination, level = 1, room = .16 }
     const body = heavy > 0 ? voiceOut(when, pan * .6, drive) : out;
     thump(when, (150 + 120 * i) * pitch, 50 * pitch, (.075 + .1 * i) * time, .2 + .42 * i, body);
     if (heavy > 0) {
-      burst(when, { freq: 7600 * pitch, to: 1500 * pitch, q: 1.1, peak: .3 * heavy, dur: .08 * time, out: body });
+      burst(when, { freq: 7600 * clackPitch, to: 1500 * clackPitch, q: 1.1, peak: .3 * heavy, dur: .08 * time, out: body });
       thump(when + .004, 82 * pitch, 34 * pitch, .34 * time, .5 * heavy, body);
-      mode(when + .003, 3900 * pitch, .045 * heavy, .07 * time, out);
+      mode(when + .003, 3900 * clackPitch, .045 * heavy, .07 * time, out);
     }
   }
 

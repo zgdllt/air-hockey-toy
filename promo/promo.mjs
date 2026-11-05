@@ -1,9 +1,10 @@
 // Director: composes one frame of the promo film from video time t (stateless,
 // so the preview can scrub and the recorder can render frames in any order).
-import { buildFilm, lookAt, DURATION, FPS } from './timeline.mjs';
+import { buildFilm, lookAt, DURATION, FPS, TOY_START } from './timeline.mjs';
 import { makeCamera, smooth, easeOut, clamp } from './camera3d.mjs';
 import { drawRink, drawRails, drawBodies, drawTrajectory, drawCollisions, zOf, C } from './scene.mjs';
 import { drawBackdrop, drawTitle, titlePuck, caption, drawHud, drawGoalSlam, drawTimeAxis, drawEndCard } from './overlay.mjs';
+import { toyLook, drawToyTileBack, drawToyTileFront, drawToyText, endCardFade } from './toycard.mjs';
 
 export const WIDTH = 1920, HEIGHT = 1080;
 export { DURATION, FPS };
@@ -32,14 +33,17 @@ export function createDirector() {
     return [Math.sin(t * 91) * amount, Math.cos(t * 73) * amount * .7];
   }
 
-  function world(ctx, t) {
-    const look = lookAt(film, t, WIDTH, HEIGHT);
+  /** Camera for time t; the Toy segment pulls the end-card view back into a tile. */
+  const lookFor = (t) => (t >= TOY_START ? toyLook(lookAt(film, t, WIDTH, HEIGHT), t) : lookAt(film, t, WIDTH, HEIGHT));
+
+  function world(ctx, t, look = lookFor(t)) {
     const cam = makeCamera(look.cam);
     const sculpt = t >= 20.6 && t < 25.6;
     const s = t >= 20.6 ? film.goal.t : film.simTimeAt(t);
     const replay = sculpt ? film.replayAt(t) : null;
     const [sx, sy] = shakeAt(t);
     ctx.save(); ctx.translate(sx, sy);
+    if (t >= TOY_START) drawToyTileBack(ctx, t, cam);
     drawRink(ctx, cam, look.dim);
     drawRails(ctx, cam, look.dim, 'back');
     const future = t < 11.4 ? 0 : t < 14 ? smooth((t - 11.4) / .6) : t < 17.2 ? 1 - smooth((t - 16.6) / .6)
@@ -53,6 +57,7 @@ export function createDirector() {
     drawBodies(ctx, cam, state, look.dim, sculpt ? 1 - look.lift * .75 : 1);
     drawRails(ctx, cam, look.dim, 'front');
     drawTimeAxis(ctx, cam, film, look.lift, zOf);
+    if (t >= TOY_START) drawToyTileFront(ctx, t, cam);
     ctx.restore();
     if (look.chase > .05 && t < film.goal.video) {
       const p = film.sample(s).puck, q = cam.project(clamp(p.x, 0, 1030), p.y, 4);
@@ -99,13 +104,15 @@ export function createDirector() {
       }
       return;
     }
-    drawBackdrop(ctx, lookAt(film, t, WIDTH, HEIGHT).dark);
-    const { look, s } = world(ctx, t);
+    const look0 = lookFor(t);
+    drawBackdrop(ctx, look0.dark);
+    const { look, s } = world(ctx, t, look0);
     const hudAlpha = smooth((t - 3.5) / .5) * (1 - smooth((t - 25.3) / .4));
     drawHud(ctx, film, t, s, look, hudAlpha);
     for (const c of captions) caption(ctx, t, c);
     drawGoalSlam(ctx, t, film.goal.video, `GOAL  ·  OFF THE POST  ·  ${film.goal.side === 'player' ? '1 : 0' : '0 : 1'}`);
-    if (t >= 25.6) drawEndCard(ctx, t, film);
+    if (t >= 25.6 && t < TOY_START + .25) drawEndCard(ctx, t, film, endCardFade(t));
+    if (t >= TOY_START) drawToyText(ctx, t);
   }
 
   return { film, renderAt };

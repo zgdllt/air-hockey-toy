@@ -2,7 +2,10 @@
 // times, plus a beat bed that follows the shot structure. Pure Web Audio.
 import { createSfx } from '../sfx.mjs';
 import { titlePuckBounces } from './overlay.mjs';
-import { DURATION } from './timeline.mjs';
+import { DURATION, TOY_START, VO_START } from './timeline.mjs';
+import { BEATS } from './toycard.mjs';
+
+const VOICE_URL = new URL('./assets/voiceover-toy.wav', import.meta.url);
 
 const RATE = 48000;
 
@@ -11,7 +14,8 @@ export async function renderSoundtrack(film) {
   const ac = new OfflineAudioContext(2, Math.ceil(RATE * DURATION), RATE);
   const master = ac.createDynamicsCompressor();
   master.threshold.value = -14; master.ratio.value = 4; master.attack.value = .003; master.release.value = .2;
-  const out = ac.createGain(); out.gain.value = .9; master.connect(out).connect(ac.destination);
+  // duck: music/SFX dip under the voice-over, which joins after the compressor so it never pumps.
+  const duck = ac.createGain(), out = ac.createGain(); out.gain.value = .9; master.connect(duck).connect(out).connect(ac.destination);
   const verb = ac.createConvolver(); verb.buffer = impulse(ac, 1.8); const send = ac.createGain(); send.gain.value = .22;
   send.connect(verb).connect(master);
   const noise = noiseBuffer(ac);
@@ -52,7 +56,35 @@ export async function renderSoundtrack(film) {
   boom(bus, 26.2, .6);
   [440, 554, 659, 880].forEach((f, i) => tone(bus, 27.7 + i * .12, .5, f, f * .98, 'sine', .07));
   for (const f of [220, 277.2, 329.6, 440]) pad(bus, 27.7, 2.2, f, .045);
+
+  await toySegment(bus, sfx, duck, out);
   return ac.startRendering();
+}
+
+/** Closing Toy segment: transition whoosh, a light bed at 120 BPM, UI ticks on each beat, then the voice. */
+async function toySegment(bus, sfx, duck, out) {
+  const { ac } = bus;
+  sweep(bus, TOY_START - .45, .7, 500, 5200, .12, 0);
+  sfx.wall({ when: TOY_START + .45, speed: 900, x: 700 });
+  for (const f of [220, 277.2, 329.6, 415.3]) pad(bus, TOY_START + .2, DURATION - TOY_START - .3, f, .04);
+  for (let t = TOY_START + .5; t < DURATION - 1; t += .5) kick(bus, t, .32);
+  for (let t = TOY_START + .75; t < DURATION - 1; t += .5) hat(bus, t, .022);
+  for (let t = TOY_START + .5; t < DURATION - 1; t += 2) bass(bus, t, 2, [55, 65.4, 49, 55][Math.round((t - TOY_START - .5) / 2) % 4]);
+  for (const t of [BEATS.step1, BEATS.step2, BEATS.link]) sfx.wall({ when: t, speed: 700, x: 300 });
+  for (let i = 0; i < 3; i += 1) tone(bus, BEATS.typeFrom + i * (BEATS.typeTo - BEATS.typeFrom) / 2, .04, 2400, 2000, 'square', .012);
+  sfx.hit({ when: BEATS.play + .05, speed: 1700, x: 800, variation: 0 });
+  [440, 554, 659, 880].forEach((f, i) => tone(bus, BEATS.play + .25 + i * .1, .5, f, f * .98, 'sine', .05));
+
+  const res = await fetch(VOICE_URL);
+  if (!res.ok) throw new Error(`voice-over ${VOICE_URL.pathname}: HTTP ${res.status}`);
+  const voice = await ac.decodeAudioData(await res.arrayBuffer());
+  const end = VO_START + voice.duration;
+  // BEATS / VO_LINES are timed to this take; a longer re-take must not be silently cut at the film's end.
+  if (end > DURATION - .35) throw new Error(`voice-over ends at ${end.toFixed(2)} s, past DURATION - 0.35 s; retime toycard.mjs`);
+  duck.gain.setValueAtTime(1, VO_START - .25); duck.gain.linearRampToValueAtTime(.42, VO_START);
+  duck.gain.setValueAtTime(.42, end); duck.gain.linearRampToValueAtTime(1, end + .3);
+  const src = ac.createBufferSource(), g = ac.createGain(); src.buffer = voice; g.gain.value = .55; // ≈ -5 dB: keeps the Toy section level with the rally (measured with ebur128)
+  src.connect(g).connect(out); src.start(VO_START);
 }
 
 function noiseBuffer(ac) {
